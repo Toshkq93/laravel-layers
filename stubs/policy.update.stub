@@ -1,0 +1,4 @@
+    public function update(?Authenticatable $user, {{ keyType }} $id): bool
+    {
+        return true;
+    }

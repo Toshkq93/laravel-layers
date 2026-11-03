@@ -1,0 +1,13 @@
+    public function test_show_returns_{{ singular }}(): void
+    {
+        ${{ variable }} = {{ factory }}::new()->create();
+
+        $this->getJson(route('{{ route }}', ${{ variable }}->getKey()))
+            ->assertOk()
+            ->assertJsonPath('{{ key }}', ${{ variable }}->getKey());
+    }
+
+    public function test_show_returns_404_for_missing_{{ singular }}(): void
+    {
+        $this->getJson(route('{{ route }}', {{ missingKey }}))->assertNotFound();
+    }

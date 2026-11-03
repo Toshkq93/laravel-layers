@@ -1,0 +1,9 @@
+    public function test_store_rejects_duplicate_{{ field }}(): void
+    {
+        $existing = {{ factory }}::new()->create();
+        $payload = [...{{ factory }}::new()->raw(), '{{ field }}' => $existing->getRawOriginal('{{ field }}')];
+
+        $this->postJson(route('{{ route }}'), $payload)
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['{{ field }}']);
+    }

@@ -1,0 +1,16 @@
+<?php
+
+declare(strict_types=1);
+
+namespace {{ namespace }};
+
+{{ imports }}
+
+/**
+ * Abilities receive the model key, not the model: loading data is the
+ * repository's job. Inject {{ model }}Repository here if a check needs it.
+ */
+class {{ class }}
+{
+{{ methods }}
+}

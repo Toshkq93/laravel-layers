@@ -1,0 +1,19 @@
+<?php
+
+declare(strict_types=1);
+
+namespace {{ namespace }};
+
+{{ imports }}
+
+/**
+ * API tests for {{ model }}. Requests are sent as a guest: when the policy
+ * starts requiring a user, authenticate in setUp(), e.g.
+ * $this->actingAs(UserFactory::new()->create());
+ */
+class {{ class }} extends {{ extends }}
+{
+    use RefreshDatabase;
+
+{{ methods }}
+}

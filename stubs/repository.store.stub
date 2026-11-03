@@ -1,0 +1,4 @@
+    public function create({{ input }} $data): {{ output }}
+    {
+        return $this->createFrom($data);
+    }

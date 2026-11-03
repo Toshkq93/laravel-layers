@@ -1,0 +1,13 @@
+    public function test_store_creates_{{ singular }}(): void
+    {
+        $payload = {{ factory }}::new()->raw();
+
+        $response = $this->postJson(route('{{ route }}'), $payload)
+            ->assertCreated(){{ assertions }};
+
+        $this->assertDatabaseHas('{{ table }}', ['{{ key }}' => $response->json('{{ key }}')]);
+    }
+
+{{ validation }}
+
+{{ unique }}

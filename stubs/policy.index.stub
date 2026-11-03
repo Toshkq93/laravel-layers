@@ -1,0 +1,4 @@
+    public function viewAny(?Authenticatable $user): bool
+    {
+        return true;
+    }

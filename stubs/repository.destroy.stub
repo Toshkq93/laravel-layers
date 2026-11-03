@@ -1,0 +1,4 @@
+    public function delete({{ keyType }} $id): bool
+    {
+        return $this->deleteOne($id);
+    }

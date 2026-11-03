@@ -1,0 +1,25 @@
+<?php
+
+declare(strict_types=1);
+
+namespace {{ namespace }};
+
+{{ imports }}
+
+/**
+ * @extends {{ extends }}<{{ model }}>
+ */
+class {{ class }} extends {{ extends }}
+{
+    protected $model = {{ model }}::class;
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function definition(): array
+    {
+        return [
+{{ definition }}
+        ];
+    }
+}

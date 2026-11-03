@@ -1,0 +1,20 @@
+<?php
+
+declare(strict_types=1);
+
+namespace {{ namespace }};
+
+use Closure;
+use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\Response;
+
+class {{ class }}
+{
+    /**
+     * Access conditions for the {{ model }} routes.
+     */
+    public function handle(Request $request, Closure $next): Response
+    {
+        return $next($request);
+    }
+}

@@ -1,0 +1,6 @@
+    public function test_store_validates_required_fields(): void
+    {
+        $this->postJson(route('{{ route }}'), [])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors([{{ fields }}]);
+    }

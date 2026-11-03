@@ -1,0 +1,4 @@
+    public function store({{ input }} $data): {{ output }}
+    {
+        return {{ call }};
+    }

@@ -1,0 +1,4 @@
+    public function findOrFail({{ keyType }} $id): {{ output }}
+    {
+        return $this->findOneOrFail($id);
+    }

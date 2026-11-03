@@ -1,0 +1,4 @@
+    public function view(?Authenticatable $user, {{ keyType }} $id): bool
+    {
+        return true;
+    }

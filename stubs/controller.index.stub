@@ -1,0 +1,7 @@
+    /**
+     * @return LengthAwarePaginator<int, {{ output }}>
+     */
+    public function index({{ input }} $data): LengthAwarePaginator
+    {
+        return {{ call }};
+    }

@@ -1,0 +1,16 @@
+    public function test_index_returns_paginated_{{ plural }}(): void
+    {
+        {{ factory }}::new()->count(3)->create();
+
+        $this->getJson(route('{{ route }}', ['per_page' => 2]))
+            ->assertOk()
+            ->assertJsonCount(2, 'data')
+            ->assertJsonPath('total', 3);
+    }
+
+    public function test_index_validates_per_page(): void
+    {
+        $this->getJson(route('{{ route }}', ['per_page' => 1000]))
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['per_page']);
+    }

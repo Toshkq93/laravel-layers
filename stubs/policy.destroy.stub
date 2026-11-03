@@ -1,0 +1,4 @@
+    public function delete(?Authenticatable $user, {{ keyType }} $id): bool
+    {
+        return true;
+    }

@@ -1,0 +1,43 @@
+{
+    "name": "toshkq93/laravel-layers",
+    "description": "Layered architecture for Laravel: route → middleware → input DTO (spatie/laravel-data) → gate → controller → service → repository → output DTO, with generators.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": ["laravel", "architecture", "repository", "service", "dto", "laravel-data", "generator"],
+    "require": {
+        "php": "^8.2",
+        "illuminate/console": "^11.0|^12.0|^13.0",
+        "illuminate/database": "^11.0|^12.0|^13.0",
+        "illuminate/support": "^11.0|^12.0|^13.0",
+        "spatie/laravel-data": "^4.11"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^9.0|^10.0|^11.0",
+        "phpunit/phpunit": "^11.0|^12.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Toshkq93\\LaravelLayers\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Toshkq93\\LaravelLayers\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Toshkq93\\LaravelLayers\\LaravelLayersServiceProvider"
+            ]
+        }
+    },
+    "scripts": {
+        "test": "phpunit"
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

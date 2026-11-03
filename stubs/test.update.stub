@@ -1,0 +1,15 @@
+    public function test_update_changes_{{ singular }}(): void
+    {
+        ${{ variable }} = {{ factory }}::new()->create();
+        $payload = {{ payload }};
+
+        $this->patchJson(route('{{ route }}', ${{ variable }}->getKey()), $payload)
+            ->assertOk(){{ assertions }};{{ database }}
+    }
+
+    public function test_update_returns_404_for_missing_{{ singular }}(): void
+    {
+        $this->patchJson(route('{{ route }}', {{ missingKey }}), [])->assertNotFound();
+    }
+
+{{ unique }}

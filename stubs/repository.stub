@@ -1,0 +1,27 @@
+<?php
+
+declare(strict_types=1);
+
+namespace {{ namespace }};
+
+{{ imports }}
+
+/**
+ * @extends {{ extends }}<{{ model }}, {{ output }}>
+ */
+class {{ class }} extends {{ extends }}
+{
+{{ with }}
+
+    protected function model(): string
+    {
+        return {{ model }}::class;
+    }
+
+    protected function output(): string
+    {
+        return {{ output }}::class;
+    }
+
+{{ methods }}
+}

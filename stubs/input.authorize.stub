@@ -1,0 +1,4 @@
+    public static function authorize({{ parameters }}): bool
+    {
+        return {{ gate }}::allows('{{ ability }}', {{ arguments }});
+    }

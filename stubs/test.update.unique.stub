@@ -1,0 +1,16 @@
+    public function test_update_keeps_own_{{ field }}(): void
+    {
+        ${{ variable }} = {{ factory }}::new()->create();
+
+        $this->patchJson(route('{{ route }}', ${{ variable }}->getKey()), ['{{ field }}' => ${{ variable }}->getRawOriginal('{{ field }}')])
+            ->assertOk();
+    }
+
+    public function test_update_rejects_{{ field }}_of_another_{{ singular }}(): void
+    {
+        [$first, $second] = {{ factory }}::new()->count(2)->create();
+
+        $this->patchJson(route('{{ route }}', $second->getKey()), ['{{ field }}' => $first->getRawOriginal('{{ field }}')])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['{{ field }}']);
+    }

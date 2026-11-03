@@ -3,7 +3,26 @@
     "description": "Layered architecture for Laravel: route → middleware → input DTO (spatie/laravel-data) → gate → controller → service → repository → output DTO, with generators.",
     "type": "library",
     "license": "MIT",
-    "keywords": ["laravel", "architecture", "repository", "service", "dto", "laravel-data", "generator"],
+    "keywords": [
+        "laravel",
+        "architecture",
+        "repository",
+        "service",
+        "dto",
+        "laravel-data",
+        "generator"
+    ],
+    "homepage": "https://github.com/toshkq93/laravel-layers",
+    "authors": [
+        {
+            "name": "toshkq93",
+            "homepage": "https://github.com/toshkq93"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/toshkq93/laravel-layers/issues",
+        "source": "https://github.com/toshkq93/laravel-layers"
+    },
     "require": {
         "php": "^8.2",
         "illuminate/console": "^11.0|^12.0|^13.0",

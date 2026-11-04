@@ -40,6 +40,10 @@ jobs:
 
       - name: Install dependencies
         run: |
+          # Composer 2.9+ refuses packages with security advisories. Every Laravel 11 release
+          # (security support ended) and old releases picked by prefer-lowest have some, so
+          # the test matrix could not install. This only affects CI, not the package's users.
+          composer config policy.advisories.block false
           composer require "illuminate/support:${{ matrix.laravel }}" "illuminate/console:${{ matrix.laravel }}" "illuminate/database:${{ matrix.laravel }}" --no-update --no-interaction
           composer require --dev "orchestra/testbench:${{ matrix.testbench }}" --no-update --no-interaction
           composer update --${{ matrix.stability }} --prefer-dist --no-interaction --no-progress

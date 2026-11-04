@@ -110,7 +110,7 @@ php artisan make:layers Post --controller --force
 
 | Action | Route | Input DTO | Repository | Policy ability |
 |---|---|---|---|---|
-| `index` | `GET /posts` | `IndexPostData`: `page`, `per_page` (1–100; `$perPage` in PHP) | `paginate()` | `viewAny` |
+| `index` | `GET /posts` | `IndexPostData`: `page` (default 1), `per_page` (1–100, default 15; `$perPage` in PHP) | `paginate()` | `viewAny` |
 | `show` | `GET /posts/{post}` | `ShowPostData`: `id` | `findOrFail()` | `view` |
 | `store` | `POST /posts` | `StorePostData`: writable fields | `create()` | `create` |
 | `update` | `PATCH /posts/{post}` | `UpdatePostData`: `id` and writable fields, all optional | `update()` | `update` |
@@ -118,7 +118,7 @@ php artisan make:layers Post --controller --force
 
 ## Generated code
 
-The examples below are generated for this model and migration:
+The examples below are generated for this model and migration on SQLite. On MySQL, MariaDB and PostgreSQL the `varchar` columns also get `#[Max(255)]` (see [Limitations](#limitations)).
 
 ```php
 Schema::create('posts', function (Blueprint $table) {
@@ -442,8 +442,8 @@ Values are chosen in this order:
 1. **Foreign key:** the related table's factory (`users` → `UserFactory::new()`), used only when it really builds a model of that table: the factory's model class (its `$model`, or the one resolved by convention) must exist, be an Eloquent model and use the referenced table. Otherwise the value is `null`, with a `TODO` comment when the column is `NOT NULL`.
 2. **Enums:** a backed enum cast gives `randomElement(Enum::cases())`; DB enum values give `randomElement([...])`.
 3. **Formats:** uuid, date, datetime, time and numeric.
-4. **Types:** int, float, bool, array.
-5. **Strings:** a hint from the column name (`email`, `name`, `title`, `slug`, `url`, `phone`, `body`, `description`, ...), kept within `varchar(N)` when the length is known.
+4. **Types:** int, float, bool, array. A column with a custom cast class gets `null` and a `TODO` comment.
+5. **Strings:** a hint from the column name (`email`, `name`, `title`, `slug`, `url`, `phone`, `body`, `description`, ...). A `varchar(N)` shorter than 255 gets `fake()->text(N)` instead, so the value passes `#[Max(N)]`.
 
 Columns with a unique index get `fake()->unique()->...`, except booleans and enums, which have too few values for that.
 
@@ -457,8 +457,8 @@ Because `$model` is set explicitly, the tests call `PostFactory::new()` and the 
 |---|---|
 | `index` | Pagination (`per_page`, `total`); `per_page` above the limit returns 422 |
 | `show` | Returns the record; a missing key returns 404 |
-| `store` | Creates from `PostFactory::new()->raw()` and checks the response and the database; an empty payload returns 422 for every required field; a duplicate value of a unique column returns 422 |
-| `update` | A partial update changes one field in the response and the database; a missing key returns 404; a record may keep its own unique value, but taking another record's value returns 422 |
+| `store` | Creates from `PostFactory::new()->raw()` and checks the response and the database; an empty payload returns 422 for every required field; a duplicate value of the first unique column returns 422 |
+| `update` | A partial update changes one field in the response and the database; a missing key returns 404; a record may keep its own value of the first unique column, but taking another record's value returns 422 |
 | `destroy` | Returns 204; `assertModelMissing`, or `assertSoftDeleted` for models with `SoftDeletes` |
 
 ```php
@@ -507,9 +507,11 @@ Columns, types, nullability, defaults and foreign keys come from the **table** (
 | `decimal`, `numeric` / `decimal:2` | `string` | `string` | `#[Numeric]` (kept as a string to avoid losing precision) |
 | `varchar(N)` | `string` | `string` | `#[Max(N)]` |
 | `enum('a','b')` (MySQL) | `string` | `string` | `#[In(['a', 'b'])]` |
-| `uuid` | `string` | `string` | `#[Uuid]` |
+| `uuid` (native type: PostgreSQL, MariaDB) | `string` | `string` | `#[Uuid]` (on MySQL `uuid()` is `char(36)` and gets `#[Max(36)]`) |
 | `json`, `jsonb` / `array`, `AsCollection` | `array` | `array` | |
-| `date`, `timestamp` / `datetime` cast | `string` | `CarbonInterface` | `#[Date]` |
+| `date`, `datetime` / `date`, `datetime` cast, timestamps | `string` | `CarbonInterface` | `#[Date]` |
+| `date`, `datetime`, `timestamp` without a cast | `string` | `string` | `#[Date]` |
+| `time` | `string` | `string` | |
 | Backed enum cast | `PostStatus` | `PostStatus` | Inferred by laravel-data |
 | Custom cast class | `mixed` | `mixed` | |
 | Foreign key | | | `#[Exists('users', 'id')]` |
@@ -607,8 +609,8 @@ Stubs are copied to `stubs/layers/`. A stub found there takes precedence over th
 | `middleware` | `namespace`, `class`, `model` |
 | `factory` | `namespace`, `imports`, `class`, `extends`, `model`, `definition` |
 | `test` | `namespace`, `imports`, `class`, `extends`, `model`, `methods` |
-| `test.{action}` | `factory`, `route`, `variable`, `singular`, `plural`, `table`, `key`, `missingKey`; plus `assertions`, `validation` (store), `payload`, `database` (update), `deleted` (destroy) |
-| `test.store.validation` | the `test.store` placeholders and `fields` |
+| `test.{action}` | `factory`, `route`, `variable`, `singular`, `plural`, `table`, `key`, `missingKey`; plus `assertions`, `unique` (store, update), `validation` (store), `payload`, `database` (update), `deleted` (destroy) |
+| `test.store.validation` | the common `test.{action}` placeholders and `fields` |
 | `test.store.unique`, `test.update.unique` | the action's placeholders and `field` (the first unique column); rendered into `{{ unique }}` |
 
 ## Runtime API

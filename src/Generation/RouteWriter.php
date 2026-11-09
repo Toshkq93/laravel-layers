@@ -5,21 +5,33 @@ declare(strict_types=1);
 namespace Toshkq93\LaravelLayers\Generation;
 
 use Illuminate\Filesystem\Filesystem;
+use Illuminate\Support\Str;
 
 /**
  * Adds the model's routes to routes/api.php inside a marked block:
  *
  *     // layers:Post:start
- *     Route::middleware(PostMiddleware::class)->group(function () { ... });
+ *     Route::apiResource('posts', PostController::class)
+ *         ->middleware(PostMiddleware::class);
  *     // layers:Post:end
  *
- * The block is skipped when present, or replaced with $force.
+ * With a route group configured, the blocks live inside one shared group:
+ *
+ *     // layers:start
+ *     Route::prefix('v1')->middleware(['auth:sanctum'])->group(function () {
+ *         // layers:Post:start ... // layers:Post:end
+ *     });
+ *     // layers:end
+ *
+ * The model block is skipped when present, or replaced with $force.
  */
 final class RouteWriter
 {
     public const CREATED = 'created';
     public const SKIPPED = 'skipped';
     public const REPLACED = 'replaced';
+
+    private const INDENT = '    ';
 
     public function __construct(
         private readonly Filesystem $files,
@@ -29,27 +41,28 @@ final class RouteWriter
     {
         $naming = $blueprint->naming;
         $model = $blueprint->model->name();
-        $controller = $naming->class(Layer::Controller);
         $uri = $blueprint->model->plural();
         $parameter = $blueprint->routeParameter();
-        $hasMiddleware = $blueprint->has(Layer::Middleware);
-        $indent = $hasMiddleware ? '    ' : '';
 
-        $routes = [];
+        $calls = [];
 
-        foreach ($blueprint->actions as $action) {
-            $path = $action->needsId() ? "{$uri}/{{$parameter}}" : $uri;
-            $routes[] = "{$indent}Route::{$action->httpMethod()}('{$path}', [{$controller}::class, '{$action->value}'])->name('{$blueprint->routeName($action)}');";
+        if (count($blueprint->actions) < count(Action::cases())) {
+            $calls[] = 'only(['.implode(', ', array_map(fn (Action $a) => "'{$a->value}'", $blueprint->actions)).'])';
         }
 
-        $body = implode("\n", $routes);
-
-        if ($hasMiddleware) {
-            $middleware = $naming->class(Layer::Middleware);
-            $body = "Route::middleware({$middleware}::class)->group(function () {\n{$body}\n});";
+        // apiResource names the parameter after the singular URI with "_": blog-posts -> {blog_post}.
+        if (str_replace('-', '_', Str::singular($uri)) !== $parameter) {
+            $calls[] = "parameters(['{$uri}' => '{$parameter}'])";
         }
 
-        return "// layers:{$model}:start\n{$body}\n// layers:{$model}:end";
+        if ($blueprint->has(Layer::Middleware)) {
+            $calls[] = 'middleware('.$naming->class(Layer::Middleware).'::class)';
+        }
+
+        $route = "Route::apiResource('{$uri}', ".$naming->class(Layer::Controller).'::class)'
+            .implode('', array_map(fn (string $call) => "\n".self::INDENT."->{$call}", $calls)).';';
+
+        return "// layers:{$model}:start\n{$route}\n// layers:{$model}:end";
     }
 
     /**
@@ -62,18 +75,28 @@ final class RouteWriter
             : "<?php\n\nuse Illuminate\\Support\\Facades\\Route;\n";
 
         $model = preg_quote($blueprint->model->name(), '/');
-        $pattern = "/\/\/ layers:{$model}:start.*?\/\/ layers:{$model}:end/s";
+        $pattern = "/^([ \\t]*)\/\/ layers:{$model}:start.*?\/\/ layers:{$model}:end/ms";
         $block = $this->block($blueprint);
+        $group = $blueprint->routeGroup;
 
         if (preg_match($pattern, $contents)) {
             if (! $force) {
                 return ['status' => self::SKIPPED, 'path' => $path];
             }
 
-            $contents = preg_replace($pattern, str_replace(['\\', '$'], ['\\\\', '\\$'], $block), $contents);
+            // Keep the block where it is (inside or outside the group) and its indentation.
+            $contents = preg_replace_callback($pattern, fn (array $m) => $this->indent($block, $m[1]), $contents, 1);
             $status = self::REPLACED;
-        } else {
+        } elseif ($group->isEmpty()) {
             $contents = rtrim($contents)."\n\n".$block."\n";
+            $status = self::CREATED;
+        } elseif (preg_match('/\n\}\);\n\/\/ layers:end/', $contents, $m, PREG_OFFSET_CAPTURE)) {
+            $offset = $m[0][1];
+            $contents = substr($contents, 0, $offset)."\n\n".$this->indent($block, self::INDENT).substr($contents, $offset);
+            $status = self::CREATED;
+        } else {
+            $contents = rtrim($contents)."\n\n// layers:start\n".$group->opening()."\n"
+                .$this->indent($block, self::INDENT)."\n});\n// layers:end\n";
             $status = self::CREATED;
         }
 
@@ -87,6 +110,11 @@ final class RouteWriter
         $this->files->put($path, $contents);
 
         return ['status' => $status, 'path' => $path];
+    }
+
+    private function indent(string $text, string $indent): string
+    {
+        return implode("\n", array_map(fn (string $line) => $line === '' ? '' : $indent.$line, explode("\n", $text)));
     }
 
     /**

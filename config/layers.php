@@ -24,6 +24,11 @@ return [
             'suffix' => 'Data',
             'extends' => \Toshkq93\LaravelLayers\Data\OutputData::class,
         ],
+        'resource' => [
+            'namespace' => 'App\\Http\\Resources',
+            'suffix' => 'Resource',
+            'extends' => \Toshkq93\LaravelLayers\Http\Resources\DataResource::class,
+        ],
         'controller' => [
             'namespace' => 'App\\Http\\Controllers\\Api',
             'suffix' => 'Controller',
@@ -33,6 +38,7 @@ return [
         'service' => [
             'namespace' => 'App\\Services',
             'suffix' => 'Service',
+            'extends' => \Toshkq93\LaravelLayers\Services\CrudService::class,
         ],
         'repository' => [
             'namespace' => 'App\\Repositories',
@@ -95,10 +101,27 @@ return [
     |--------------------------------------------------------------------------
     | Routes
     |--------------------------------------------------------------------------
+    |
+    | Every model gets one Route::apiResource() line. With a non-empty
+    | 'group' all of them are placed in one shared group:
+    |
+    |     Route::prefix('v1')->middleware(['auth:sanctum'])->name('v1.')->group(function () {
+    |         Route::apiResource('posts', PostController::class);
+    |         Route::apiResource('users', UserController::class);
+    |     });
+    |
+    | The group line is written once; edit it by hand afterwards.
+    |
     */
 
     'routes' => [
         'file' => 'routes/api.php',
+
+        'group' => [
+            'prefix' => null,      // 'v1'
+            'middleware' => [],    // ['auth:sanctum']
+            'as' => null,          // 'v1.' — route name prefix
+        ],
     ],
 
     /*

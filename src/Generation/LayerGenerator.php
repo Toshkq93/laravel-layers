@@ -12,6 +12,7 @@ use Toshkq93\LaravelLayers\Generation\Generators\MiddlewareGenerator;
 use Toshkq93\LaravelLayers\Generation\Generators\OutputDataGenerator;
 use Toshkq93\LaravelLayers\Generation\Generators\PolicyGenerator;
 use Toshkq93\LaravelLayers\Generation\Generators\RepositoryGenerator;
+use Toshkq93\LaravelLayers\Generation\Generators\ResourceGenerator;
 use Toshkq93\LaravelLayers\Generation\Generators\ServiceGenerator;
 use Toshkq93\LaravelLayers\Generation\Generators\TestGenerator;
 
@@ -31,6 +32,7 @@ final class LayerGenerator
         foreach ([
             new InputDataGenerator($stubs),
             new OutputDataGenerator($stubs),
+            new ResourceGenerator($stubs),
             new RepositoryGenerator($stubs),
             new ServiceGenerator($stubs),
             new ControllerGenerator($stubs),

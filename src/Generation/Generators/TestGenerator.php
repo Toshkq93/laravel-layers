@@ -37,8 +37,14 @@ class TestGenerator extends Generator
         $required = array_keys(array_filter($model->writableFields(), fn (Field $f) => $f->isRequiredOnCreate()));
         $unique = array_key_first(array_filter($model->writableFields(), fn (Field $f) => $f->unique));
 
-        $methods = $this->methods($blueprint, function (Action $action) use ($blueprint, $model, $imports, $factory, $sample, $required, $unique) {
+        // Resources wrap a record in "data" and move pagination totals to "meta".
+        $withResource = $blueprint->has(Layer::Resource);
+        $data = $withResource ? 'data.' : '';
+
+        $methods = $this->methods($blueprint, function (Action $action) use ($blueprint, $model, $imports, $factory, $sample, $required, $unique, $data, $withResource) {
             $replace = [
+                'data' => $data,
+                'total' => $withResource ? 'meta.total' : 'total',
                 'factory' => $factory,
                 'route' => $blueprint->routeName($action),
                 'variable' => $model->variable(),
@@ -55,7 +61,7 @@ class TestGenerator extends Generator
 
             return $replace + match ($action) {
                 Action::Store => [
-                    'assertions' => $sample ? "\n            ->assertJsonPath('{$sample}', \$payload['{$sample}'])" : '',
+                    'assertions' => $sample ? "\n            ->assertJsonPath('{$data}{$sample}', \$payload['{$sample}'])" : '',
                     'validation' => $required === [] ? '' : rtrim($this->stubs->render('test.store.validation', $replace + [
                         'fields' => "'".implode("', '", $required)."'",
                     ])),
@@ -65,7 +71,7 @@ class TestGenerator extends Generator
                     'payload' => $sample
                         ? $imports->add(Arr::class)."::only({$factory}::new()->raw(), ['{$sample}'])"
                         : '[]',
-                    'assertions' => $sample ? "\n            ->assertJsonPath('{$sample}', \$payload['{$sample}'])" : '',
+                    'assertions' => $sample ? "\n            ->assertJsonPath('{$data}{$sample}', \$payload['{$sample}'])" : '',
                     'database' => $sample
                         ? "\n\n        \$this->assertDatabaseHas('{$model->table}', [\n            '{$model->keyName}' => \${$model->variable()}->getKey(),\n            '{$sample}' => \$payload['{$sample}'],\n        ]);"
                         : '',

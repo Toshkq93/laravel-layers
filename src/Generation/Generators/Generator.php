@@ -27,16 +27,18 @@ abstract class Generator
     abstract public function generate(Blueprint $blueprint): array;
 
     /**
-     * Renders one method stub per action: "{layer}.{action}".
+     * Renders one method stub per action: "{layer}.{action}" by default.
      *
      * @param  callable(Action): array<string, string>  $replace
+     * @param  (callable(Action): string)|null  $stub  stub name per action
      */
-    protected function methods(Blueprint $blueprint, callable $replace): string
+    protected function methods(Blueprint $blueprint, callable $replace, ?callable $stub = null): string
     {
         $methods = [];
 
         foreach ($blueprint->actions as $action) {
-            $methods[] = rtrim($this->stubs->render($this->layer()->value.'.'.$action->value, $replace($action)));
+            $name = $stub ? $stub($action) : $this->layer()->value.'.'.$action->value;
+            $methods[] = rtrim($this->stubs->render($name, $replace($action)));
         }
 
         return implode("\n\n", $methods);
@@ -80,19 +82,20 @@ abstract class Generator
     }
 
     /**
-     * Expression that performs an action on the repository:
-     * shared by the service and by a controller without a service.
+     * Expression that performs an action through $this->{$property}.
+     * The service and the repository share the CRUD API, so a controller
+     * calls either of them the same way.
      */
-    protected function repositoryCall(Action $action, Blueprint $blueprint): string
+    protected function crudCall(string $property, Action $action, Blueprint $blueprint): string
     {
         $perPage = $blueprint->naming->property('per_page');
 
-        return match ($action) {
-            Action::Index => "\$this->repository->paginate(\$data->{$perPage}, \$data->page)",
-            Action::Show => '$this->repository->findOrFail($data->id)',
-            Action::Store => '$this->repository->create($data)',
-            Action::Update => '$this->repository->update($data->id, $data)',
-            Action::Destroy => '$this->repository->delete($data->id)',
+        return "\$this->{$property}->".match ($action) {
+            Action::Index => "paginate(\$data->{$perPage}, \$data->page)",
+            Action::Show => 'findOrFail($data->id)',
+            Action::Store => 'create($data)',
+            Action::Update => 'update($data->id, $data)',
+            Action::Destroy => 'delete($data->id)',
         };
     }
 

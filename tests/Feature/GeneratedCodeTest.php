@@ -79,7 +79,7 @@ class GeneratedCodeTest extends TestCase
      * @param  list<Layer>  $layers
      * @return array{blueprint: Blueprint, files: list<\Toshkq93\LaravelLayers\Generation\GeneratedFile>}
      */
-    private function generate(array $layers, string $properties = Naming::PROPERTIES_CAMEL, array $outputsFirst = [], ?callable $patch = null): array
+    private function generate(array $layers, string $properties = Naming::PROPERTIES_CAMEL, array $outputsFirst = [], ?callable $patch = null, array $relatedLayers = [Layer::Output, Layer::Resource]): array
     {
         // A fresh namespace per test: generated classes cannot be redeclared.
         self::$namespace = 'Generated'.bin2hex(random_bytes(4));
@@ -89,6 +89,7 @@ class GeneratedCodeTest extends TestCase
         $config = [
             'input' => ['namespace' => "{$ns}\\Data\\Input", 'suffix' => 'Data', 'extends' => \Toshkq93\LaravelLayers\Data\InputData::class],
             'output' => ['namespace' => "{$ns}\\Data\\Output", 'suffix' => 'Data', 'extends' => \Toshkq93\LaravelLayers\Data\OutputData::class],
+            'resource' => ['namespace' => "{$ns}\\Http\\Resources", 'suffix' => 'Resource', 'extends' => \Toshkq93\LaravelLayers\Http\Resources\DataResource::class],
             'controller' => ['namespace' => "{$ns}\\Http\\Controllers", 'suffix' => 'Controller'],
             'service' => ['namespace' => "{$ns}\\Services", 'suffix' => 'Service'],
             'repository' => ['namespace' => "{$ns}\\Repositories", 'suffix' => 'Repository', 'extends' => \Toshkq93\LaravelLayers\Repositories\EloquentRepository::class],
@@ -118,7 +119,7 @@ class GeneratedCodeTest extends TestCase
         foreach ([...$outputsFirst, Article::class] as $model) {
             $definition = (new ModelInspector)->inspect($model);
             $naming = new Naming($definition, $config, $ns.'\\', self::$dir, $properties);
-            $blueprint = new Blueprint($definition, $naming, $model === Article::class ? $layers : [Layer::Output], Action::cases());
+            $blueprint = new Blueprint($definition, $naming, $model === Article::class ? $layers : $relatedLayers, Action::cases());
             $blueprint = $blueprint->withImplicitLayers();
             $files = (new LayerGenerator(new StubRenderer))->generate($blueprint);
 
@@ -135,11 +136,8 @@ class GeneratedCodeTest extends TestCase
     {
         $controller = self::$namespace.'\\Http\\Controllers\\ArticleController';
 
-        Route::get('articles', [$controller, 'index']);
-        Route::get('articles/{article}', [$controller, 'show']);
-        Route::post('articles', [$controller, 'store']);
-        Route::patch('articles/{article}', [$controller, 'update']);
-        Route::delete('articles/{article}', [$controller, 'destroy']);
+        // The same registration RouteWriter generates.
+        Route::apiResource('articles', $controller);
     }
 
     public static function propertyNaming(): array
@@ -173,24 +171,24 @@ class GeneratedCodeTest extends TestCase
 
         $id = $this->postJson('articles', ['title' => 'Hello', 'user_id' => 1, 'body' => null, 'secret' => 'a', 'meta' => null, 'published_at' => null, 'code_2fa' => 'abc'])
             ->assertCreated()
-            ->assertJsonPath('user_id', 1)
-            ->assertJsonPath('code_2fa', 'abc')
-            ->assertJsonPath('status', 'draft')     // DB default, re-read after insert
-            ->assertJsonPath('published', false)
-            ->assertJsonMissingPath('secret')       // $hidden
-            ->json('id');
+            ->assertJsonPath('data.user_id', 1)
+            ->assertJsonPath('data.code_2fa', 'abc')
+            ->assertJsonPath('data.status', 'draft')     // DB default, re-read after insert
+            ->assertJsonPath('data.published', false)
+            ->assertJsonMissingPath('data.secret')       // $hidden
+            ->json('data.id');
 
-        $this->getJson("articles/{$id}")->assertOk()->assertJsonPath('title', 'Hello');
+        $this->getJson("articles/{$id}")->assertOk()->assertJsonPath('data.title', 'Hello');
         $this->getJson('articles/999')->assertNotFound();
 
         $this->patchJson("articles/{$id}", ['status' => 'published', 'published_at' => '2026-01-02 03:04:05'])
             ->assertOk()
-            ->assertJsonPath('published_at', '2026-01-02T03:04:05+00:00')
-            ->assertJsonPath('status', 'published')
-            ->assertJsonPath('title', 'Hello');     // untouched: partial update
+            ->assertJsonPath('data.published_at', '2026-01-02T03:04:05+00:00')
+            ->assertJsonPath('data.status', 'published')
+            ->assertJsonPath('data.title', 'Hello');     // untouched: partial update
 
         $this->getJson('articles?per_page=500')->assertJsonValidationErrors(['per_page']);
-        $this->getJson('articles?per_page=10')->assertOk()->assertJsonPath('total', 1)->assertJsonPath('data.0.id', $id);
+        $this->getJson('articles?per_page=10')->assertOk()->assertJsonPath('meta.total', 1)->assertJsonPath('data.0.id', $id);
 
         $this->deleteJson("articles/{$id}")->assertNoContent();
         $this->getJson("articles/{$id}")->assertNotFound();
@@ -219,6 +217,8 @@ class GeneratedCodeTest extends TestCase
 
         $controller = $this->contents($files, Layer::Controller);
         $this->assertStringContainsString('private readonly ArticleRepository $repository', $controller);
+        // No resource: the output DTO is returned as is.
+        $this->assertStringContainsString('public function show(ShowArticleData $data): ArticleData', $controller);
         $this->assertStringContainsString('$this->repository->create($data)', $controller);
 
         // No gate: DTOs have no authorize().
@@ -227,6 +227,23 @@ class GeneratedCodeTest extends TestCase
         $this->routes();
         $this->postJson('articles', ['title' => 'Hi', 'user_id' => 1, 'body' => null, 'secret' => 'a', 'meta' => null, 'published_at' => null])
             ->assertCreated();
+    }
+
+    public function test_repository_inherits_crud_from_the_base(): void
+    {
+        ['files' => $files] = $this->generate([Layer::Repository]);
+
+        $repository = $this->contents($files, Layer::Repository);
+        $this->assertStringContainsString('class ArticleRepository extends EloquentRepository', $repository);
+        $this->assertStringContainsString('return Article::class;', $repository);
+
+        foreach (['paginate', 'findOrFail', 'create', 'update', 'delete'] as $method) {
+            $this->assertStringNotContainsString("function {$method}(", $repository);
+        }
+
+        // No unused imports left from the old per-action methods.
+        $this->assertStringNotContainsString('LengthAwarePaginator', $repository);
+        $this->assertStringNotContainsString('StoreArticleData', $repository);
     }
 
     public function test_camel_case_properties_are_mapped(): void
@@ -294,7 +311,9 @@ class GeneratedCodeTest extends TestCase
 
         $this->assertStringContainsString("route('articles.index', ['per_page' => 2])", $test);
         $this->assertStringContainsString("->assertJsonValidationErrors(['user_id', 'title']);", $test);
-        $this->assertStringContainsString("->assertJsonPath('title', \$payload['title'])", $test);
+        $this->assertStringContainsString("->assertJsonPath('data.title', \$payload['title'])", $test);
+        $this->assertStringContainsString("->assertJsonPath('meta.total', 3);", $test);
+        $this->assertStringContainsString("->assertJsonPath('data.id', \$article->getKey());", $test);
         $this->assertStringContainsString('$this->assertSoftDeleted($article);', $test);   // Article uses SoftDeletes
         $this->assertSame(0, $this->lint(collect($files)->firstWhere('layer', Layer::Test)->path));
     }
@@ -314,8 +333,8 @@ class GeneratedCodeTest extends TestCase
         $this->assertStringContainsString('test_store_rejects_duplicate_slug', $this->contents($files, Layer::Test));
 
         $payload = ['user_id' => 1, 'body' => null, 'meta' => null, 'published_at' => null, 'slug' => 'taken'];
-        $first = $this->postJson('articles', ['title' => 'A'] + $payload)->assertCreated()->json('id');
-        $second = $this->postJson('articles', ['title' => 'B'] + ['slug' => 'free'] + $payload)->assertCreated()->json('id');
+        $first = $this->postJson('articles', ['title' => 'A'] + $payload)->assertCreated()->json('data.id');
+        $second = $this->postJson('articles', ['title' => 'B'] + ['slug' => 'free'] + $payload)->assertCreated()->json('data.id');
 
         $this->postJson('articles', ['title' => 'C'] + $payload)->assertJsonValidationErrors(['slug']);
         $this->patchJson("articles/{$first}", ['slug' => 'taken'])->assertOk();                       // its own value
@@ -350,9 +369,9 @@ class GeneratedCodeTest extends TestCase
         // create(): relations of the new record are loaded too.
         $id = $this->postJson('articles', ['title' => 'A', 'user_id' => 1, 'body' => null, 'meta' => null, 'published_at' => null])
             ->assertCreated()
-            ->assertJsonPath('author.id', 1)
-            ->assertJsonPath('comments', [])
-            ->json('id');
+            ->assertJsonPath('data.author.id', 1)
+            ->assertJsonPath('data.comments', [])
+            ->json('data.id');
 
         \DB::table('comments')->insert([
             ['article_id' => $id, 'body' => 'first'],
@@ -361,15 +380,15 @@ class GeneratedCodeTest extends TestCase
 
         $this->getJson("articles/{$id}")
             ->assertOk()
-            ->assertJsonPath('author.id', 1)
-            ->assertJsonPath('comments.1.body', 'second')
-            ->assertJsonPath('comments.0.article_id', $id)         // snake_case inside nested DTOs too
-            ->assertJsonMissingPath('latest_comment')              // not loaded -> not in the response
-            ->assertJsonMissingPath('latestComment');
+            ->assertJsonPath('data.author.id', 1)
+            ->assertJsonPath('data.comments.1.body', 'second')
+            ->assertJsonPath('data.comments.0.article_id', $id)         // snake_case inside nested DTOs too
+            ->assertJsonMissingPath('data.latest_comment')              // not loaded -> not in the response
+            ->assertJsonMissingPath('data.latestComment');
 
         // update(): a changed foreign key reloads the relation.
         \DB::table('users')->insert(['id' => 2]);
-        $this->patchJson("articles/{$id}", ['user_id' => 2])->assertOk()->assertJsonPath('author.id', 2);
+        $this->patchJson("articles/{$id}", ['user_id' => 2])->assertOk()->assertJsonPath('data.author.id', 2);
 
         // No N+1: the number of queries does not grow with the number of records.
         $queries = function (): int {
@@ -396,16 +415,16 @@ class GeneratedCodeTest extends TestCase
 
         $id = $this->postJson('articles', ['title' => 'A', 'user_id' => 1, 'body' => null, 'meta' => null, 'published_at' => null])
             ->assertCreated()
-            ->assertJsonMissingPath('author')
-            ->json('id');
+            ->assertJsonMissingPath('data.author')
+            ->json('data.id');
 
         \DB::enableQueryLog();
         $this->getJson("articles/{$id}")
             ->assertOk()
-            ->assertJsonPath('title', 'A')
-            ->assertJsonMissingPath('author')
-            ->assertJsonMissingPath('comments')
-            ->assertJsonMissingPath('latest_comment');
+            ->assertJsonPath('data.title', 'A')
+            ->assertJsonMissingPath('data.author')
+            ->assertJsonMissingPath('data.comments')
+            ->assertJsonMissingPath('data.latest_comment');
 
         // Only the article itself is queried: building the DTO never lazy-loads relations.
         $this->assertCount(1, \DB::getQueryLog());
@@ -422,14 +441,75 @@ class GeneratedCodeTest extends TestCase
         $this->assertStringContainsString('php artisan make:layers User --output', $output->notes[0]);
     }
 
-    public function test_service_without_repository_is_a_stub(): void
+    #[DataProvider('propertyNaming')]
+    public function test_resource_lists_fields_and_relations(string $properties): void
     {
-        ['files' => $files] = $this->generate([Layer::Service]);
+        ['files' => $files] = $this->generate([Layer::Resource], $properties, [User::class, Comment::class]);
+
+        $resource = $this->contents($files, Layer::Resource);
+        $camel = $properties === Naming::PROPERTIES_CAMEL;
+
+        $this->assertStringContainsString("@mixin ArticleData\n *\n * @property ArticleData \$resource\n */\nclass ArticleResource extends DataResource", $resource);
+        $this->assertStringContainsString("'user_id' => \$this->".($camel ? 'userId' : 'user_id').',', $resource);
+        $this->assertStringContainsString("'code_2fa' => \$this->".($camel ? 'code2fa' : 'code_2fa').',', $resource);
+        $this->assertStringContainsString("'published_at' => \$this->".($camel ? 'publishedAt' : 'published_at').'?->format(DATE_ATOM),', $resource);
+        $this->assertStringNotContainsString("'secret'", $resource);   // $hidden
+        $this->assertStringContainsString("'author' => \$this->whenLoadedData(\$this->author, UserResource::class),", $resource);
+        $this->assertStringContainsString("'latest_comment' => \$this->whenLoadedData(\$this->".($camel ? 'latestComment' : 'latest_comment').', CommentResource::class),', $resource);
+        $this->assertSame(0, $this->lint(collect($files)->firstWhere('layer', Layer::Resource)->path));
+    }
+
+    public function test_relation_without_resource_is_skipped_with_a_note(): void
+    {
+        // UserData / CommentData exist, their resources do not.
+        ['files' => $files] = $this->generate([Layer::Resource], Naming::PROPERTIES_CAMEL, [User::class, Comment::class], relatedLayers: [Layer::Output]);
+
+        $resource = collect($files)->firstWhere('layer', Layer::Resource);
+        $this->assertStringNotContainsString("'author'", $resource->contents);
+        $this->assertStringContainsString('Relation [author] skipped in the resource', $resource->notes[0]);
+        $this->assertStringContainsString('php artisan make:layers User --resource', $resource->notes[0]);
+    }
+
+    public function test_controller_returns_resources(): void
+    {
+        ['files' => $files] = $this->generate([Layer::Controller, Layer::Service, Layer::Resource]);
+
+        $controller = $this->contents($files, Layer::Controller);
+        $this->assertStringContainsString("public function index(IndexArticleData \$data): AnonymousResourceCollection\n    {\n        return ArticleResource::collection(\$this->service->paginate(", $controller);
+        $this->assertStringContainsString("public function show(ShowArticleData \$data): ArticleResource\n    {\n        return ArticleResource::make(\$this->service->findOrFail(\$data->id));", $controller);
+        $this->assertStringContainsString("return ArticleResource::make(\$this->service->create(\$data))\n            ->response()\n            ->setStatusCode(Response::HTTP_CREATED);", $controller);
+        $this->assertStringNotContainsString('Output\\ArticleData;', $controller);   // the output DTO is not referenced
+        $this->assertStringNotContainsString('LengthAwarePaginator', $controller);
+    }
+
+    public function test_service_extends_crud_service_and_pulls_in_the_repository(): void
+    {
+        ['blueprint' => $blueprint, 'files' => $files] = $this->generate([Layer::Service]);
+
+        $this->assertTrue($blueprint->generates(Layer::Repository));
+        $this->assertTrue($blueprint->generates(Layer::Output));
+        $this->assertFalse($blueprint->generates(Layer::Input));   // the service no longer takes input DTOs
 
         $service = $this->contents($files, Layer::Service);
-        $this->assertStringNotContainsString('__construct', $service);
-        $this->assertStringContainsString("throw new LogicException('Not implemented.')", $service);
-        $this->assertSame(0, $this->lint($files[array_key_last($files)]->path));
+        $this->assertStringContainsString("/**\n * @extends CrudService<ArticleRepository, ArticleData>\n */\nclass ArticleService extends CrudService", $service);
+        $this->assertStringContainsString("public function __construct(ArticleRepository \$repository)\n    {\n        parent::__construct(\$repository);", $service);
+        $this->assertStringNotContainsString('function paginate(', $service);
+
+        foreach ($files as $file) {
+            $this->assertSame(0, $this->lint($file->path), "Syntax error in {$file->path}");
+        }
+    }
+
+    public function test_controller_unpacks_the_dto_for_the_service(): void
+    {
+        ['files' => $files] = $this->generate([Layer::Controller, Layer::Service]);
+
+        $controller = $this->contents($files, Layer::Controller);
+        $this->assertStringContainsString('return $this->service->paginate($data->perPage, $data->page);', $controller);
+        $this->assertStringContainsString('return $this->service->findOrFail($data->id);', $controller);
+        $this->assertStringContainsString('return $this->service->create($data);', $controller);
+        $this->assertStringContainsString('return $this->service->update($data->id, $data);', $controller);
+        $this->assertStringContainsString('$this->service->delete($data->id);', $controller);
     }
 
     /** @param list<\Toshkq93\LaravelLayers\Generation\GeneratedFile> $files */

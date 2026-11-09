@@ -22,6 +22,4 @@ class {{ class }} extends {{ extends }}
     {
         return {{ output }}::class;
     }
-
-{{ methods }}
 }

@@ -1,0 +1,6 @@
+    public function store({{ input }} $data): JsonResponse
+    {
+        return {{ resource }}::make({{ call }})
+            ->response()
+            ->setStatusCode(Response::HTTP_CREATED);
+    }

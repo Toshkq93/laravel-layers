@@ -8,6 +8,7 @@ enum Layer: string
 {
     case Input = 'input';
     case Output = 'output';
+    case Resource = 'resource';
     case Repository = 'repository';
     case Service = 'service';
     case Controller = 'controller';
@@ -22,6 +23,7 @@ enum Layer: string
         return match ($this) {
             self::Input => 'Input DTO (validation)',
             self::Output => 'Output DTO',
+            self::Resource => 'API resource (controller responses)',
             self::Repository => 'Repository',
             self::Service => 'Service',
             self::Controller => 'Controller',

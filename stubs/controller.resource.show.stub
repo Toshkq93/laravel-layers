@@ -1,0 +1,4 @@
+    public function show({{ input }} $data): {{ resource }}
+    {
+        return {{ resource }}::make({{ call }});
+    }

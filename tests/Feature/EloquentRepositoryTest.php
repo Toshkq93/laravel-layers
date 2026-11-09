@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Toshkq93\LaravelLayers\Tests\Feature;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
@@ -73,6 +74,42 @@ class EloquentRepositoryTest extends TestCase
         $this->assertSame(5, $page->total());
         $this->assertCount(2, $page->items());
         $this->assertContainsOnlyInstancesOf(PostOutputData::class, $page->items());
+    }
+
+    public function test_paginate_sorts_by_key_and_reads_the_page(): void
+    {
+        foreach (['C', 'A', 'B'] as $title) {
+            Post::create(['title' => $title, 'published' => true]);
+        }
+
+        $this->assertSame(['C', 'A'], collect($this->repository->paginate(2)->items())->pluck('title')->all());
+        $this->assertSame(['B'], collect($this->repository->paginate(2, 2)->items())->pluck('title')->all());
+    }
+
+    public function test_paginate_sort_and_query_can_be_overridden(): void
+    {
+        foreach (['C', 'A', 'B'] as $i => $title) {
+            Post::create(['title' => $title, 'published' => $i !== 1]);
+        }
+
+        $byTitle = new class extends PostRepository
+        {
+            protected ?string $orderBy = 'title';
+
+            protected string $orderDirection = 'desc';
+        };
+
+        $this->assertSame(['C', 'B', 'A'], collect($byTitle->paginate()->items())->pluck('title')->all());
+
+        $publishedOnly = new class extends PostRepository
+        {
+            protected function paginateQuery(): Builder
+            {
+                return parent::paginateQuery()->where('published', true);
+            }
+        };
+
+        $this->assertSame(['C', 'B'], collect($publishedOnly->paginate()->items())->pluck('title')->all());
     }
 
     public function test_update_and_delete(): void

@@ -28,6 +28,7 @@ final class Blueprint
         public readonly Naming $naming,
         public readonly array $layers,
         public readonly array $actions,
+        public readonly RouteGroup $routeGroup = new RouteGroup,
     ) {}
 
     public function generates(Layer $layer): bool
@@ -71,10 +72,10 @@ final class Blueprint
         return $this->model->variable();
     }
 
-    /** posts.index */
+    /** posts.index (v1.posts.index inside a named route group) */
     public function routeName(Action $action): string
     {
-        return $this->model->plural().'.'.$action->value;
+        return $this->routeGroup->namePrefix().$this->model->plural().'.'.$action->value;
     }
 
     /**
@@ -110,18 +111,26 @@ final class Blueprint
     }
 
     /**
-     * Adds layers the selected ones cannot compile without:
-     * controller / service / repository work with input and output DTOs.
+     * Adds layers the selected ones cannot compile without: the controller
+     * takes input DTOs, the controller / service / repository return output
+     * DTOs, the resource wraps the output DTO, and the service extends the CRUD
+     * service around a repository.
      */
     public function withImplicitLayers(): self
     {
         $layers = $this->layers;
-        $needsData = $this->generates(Layer::Controller) || $this->generates(Layer::Service) || $this->generates(Layer::Repository);
-
         $needs = [];
 
-        if ($needsData) {
-            array_push($needs, Layer::Input, Layer::Output);
+        if ($this->generates(Layer::Controller)) {
+            $needs[] = Layer::Input;
+        }
+
+        if ($this->generates(Layer::Controller) || $this->generates(Layer::Service) || $this->generates(Layer::Repository) || $this->generates(Layer::Resource)) {
+            $needs[] = Layer::Output;
+        }
+
+        if ($this->generates(Layer::Service)) {
+            $needs[] = Layer::Repository;
         }
 
         // Tests create their records with the model factory.
@@ -137,6 +146,6 @@ final class Blueprint
 
         $ordered = array_values(array_filter(Layer::cases(), fn (Layer $l) => in_array($l, $layers, true)));
 
-        return new self($this->model, $this->naming, $ordered, $this->actions);
+        return new self($this->model, $this->naming, $ordered, $this->actions, $this->routeGroup);
     }
 }

@@ -1,0 +1,6 @@
+    public function destroy({{ input }} $data): Response
+    {
+        {{ call }};
+
+        return response()->noContent();
+    }

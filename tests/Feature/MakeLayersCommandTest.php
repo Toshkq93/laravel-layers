@@ -35,6 +35,31 @@ class MakeLayersCommandTest extends TestCase
         $this->assertFileDoesNotExist(app_path('Http/Controllers/Api/PostController.php'));
     }
 
+    public function test_all_skips_the_gate(): void
+    {
+        $this->artisan('make:layers', ['model' => Post::class, '--all' => true, '--dry-run' => true])
+            ->expectsOutputToContain('app/Http/Controllers/Api/PostController.php')
+            ->expectsOutputToContain('app/Http/Resources/PostResource.php')
+            ->doesntExpectOutputToContain('PostPolicy.php')
+            ->assertSuccessful();
+    }
+
+    public function test_no_interaction_without_layer_options_skips_the_gate(): void
+    {
+        $this->artisan('make:layers', ['model' => Post::class, '--dry-run' => true, '--no-interaction' => true])
+            ->expectsOutputToContain('app/Repositories/PostRepository.php')
+            ->doesntExpectOutputToContain('PostPolicy.php')
+            ->assertSuccessful();
+    }
+
+    public function test_all_with_gate_generates_the_policy(): void
+    {
+        $this->artisan('make:layers', ['model' => Post::class, '--all' => true, '--gate' => true, '--dry-run' => true])
+            ->expectsOutputToContain('app/Policies/PostPolicy.php')
+            ->expectsOutputToContain('app/Http/Controllers/Api/PostController.php')
+            ->assertSuccessful();
+    }
+
     public function test_unknown_model_fails(): void
     {
         $this->artisan('make:layers', ['model' => 'Nope', '--all' => true])

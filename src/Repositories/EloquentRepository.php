@@ -15,6 +15,10 @@ use Toshkq93\LaravelLayers\Data\OutputData;
 /**
  * Base repository on top of Eloquent.
  *
+ * Gives every repository the CRUD methods (paginate, find, findOrFail,
+ * create, update, delete); a concrete repository only names its model and
+ * output DTO and adds its own queries.
+ *
  * The model never leaves the repository: every public method of a concrete
  * repository should return OutputData, a Collection of OutputData,
  * a paginator of OutputData, or a scalar.
@@ -35,6 +39,14 @@ abstract class EloquentRepository
     protected array $with = [];
 
     /**
+     * Column paginate() sorts by; null = the model's primary key.
+     */
+    protected ?string $orderBy = null;
+
+    /** 'asc' or 'desc'. */
+    protected string $orderDirection = 'asc';
+
+    /**
      * @return class-string<TModel>
      */
     abstract protected function model(): string;
@@ -45,11 +57,77 @@ abstract class EloquentRepository
     abstract protected function output(): string;
 
     /**
+     * @return LengthAwarePaginator<int, TOutput>
+     */
+    public function paginate(int $perPage = 15, int $page = 1): LengthAwarePaginator
+    {
+        return $this->toPaginator(
+            $this->paginateQuery()->paginate(perPage: $perPage, page: $page),
+        );
+    }
+
+    /**
+     * @return TOutput|null
+     */
+    public function find(int|string $id): ?OutputDataInterface
+    {
+        return $this->findOne($id);
+    }
+
+    /**
+     * @return TOutput
+     *
+     * @throws \Illuminate\Database\Eloquent\ModelNotFoundException
+     */
+    public function findOrFail(int|string $id): OutputDataInterface
+    {
+        return $this->findOneOrFail($id);
+    }
+
+    /**
+     * @return TOutput
+     */
+    public function create(InputDataInterface $data): OutputDataInterface
+    {
+        return $this->createFrom($data);
+    }
+
+    /**
+     * @return TOutput
+     *
+     * @throws \Illuminate\Database\Eloquent\ModelNotFoundException
+     */
+    public function update(int|string $id, InputDataInterface $data): OutputDataInterface
+    {
+        return $this->updateFrom($id, $data);
+    }
+
+    public function delete(int|string $id): bool
+    {
+        return $this->deleteOne($id);
+    }
+
+    /**
      * @return Builder<TModel>
      */
     protected function query(): Builder
     {
         return ($this->model())::query()->with($this->with);
+    }
+
+    /**
+     * Query behind paginate(): override to add filters or another sort.
+     *
+     * @return Builder<TModel>
+     */
+    protected function paginateQuery(): Builder
+    {
+        $query = $this->query();
+
+        return $query->orderBy(
+            $this->orderBy ?? $query->getModel()->getQualifiedKeyName(),
+            $this->orderDirection,
+        );
     }
 
     /**

@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace Toshkq93\LaravelLayers\Generation\Generators;
 
-use Illuminate\Contracts\Pagination\LengthAwarePaginator;
-use Toshkq93\LaravelLayers\Generation\Action;
 use Toshkq93\LaravelLayers\Generation\Blueprint;
 use Toshkq93\LaravelLayers\Generation\Imports;
 use Toshkq93\LaravelLayers\Generation\Layer;
 
+/**
+ * paginate(), find(), findOrFail(), create(), update() and delete() are
+ * inherited from the base repository, so the generated class only names its
+ * model and output DTO.
+ */
 class RepositoryGenerator extends Generator
 {
     public function layer(): Layer
@@ -41,26 +44,14 @@ class RepositoryGenerator extends Generator
 
         $output = $imports->add($naming->fqcn(Layer::Output));
 
-        $methods = $this->methods($blueprint, function (Action $action) use ($blueprint, $naming, $imports, $output) {
-            if ($action === Action::Index) {
-                $imports->add(LengthAwarePaginator::class);
-            }
-
-            return [
-                'output' => $output,
-                'input' => in_array($action, [Action::Store, Action::Update], true) ? $imports->add($naming->fqcn(Layer::Input, $action)) : '',
-                'keyType' => $blueprint->keyType(),
-                'key' => $blueprint->model->keyName,
-            ];
-        });
-
         $contents = $this->stubs->render('repository', [
             'namespace' => $namespace,
             'model' => $imports->add($blueprint->model->class),
             'output' => $output,
             'extends' => $imports->add($naming->extends(Layer::Repository)),
             'class' => $naming->class(Layer::Repository),
-            'methods' => $methods,
+            // CRUD comes from the base repository. Kept empty for stubs published before 0.2.
+            'methods' => '',
             'with' => $this->with($blueprint),
             'imports' => $imports->render(),
         ]);

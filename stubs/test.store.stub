@@ -5,7 +5,7 @@
         $response = $this->postJson(route('{{ route }}'), $payload)
             ->assertCreated(){{ assertions }};
 
-        $this->assertDatabaseHas('{{ table }}', ['{{ key }}' => $response->json('{{ key }}')]);
+        $this->assertDatabaseHas('{{ table }}', ['{{ key }}' => $response->json('{{ data }}{{ key }}')]);
     }
 
 {{ validation }}

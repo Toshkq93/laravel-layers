@@ -1,4 +1,0 @@
-    public function update({{ keyType }} $id, {{ input }} $data): {{ output }}
-    {
-        return $this->updateFrom($id, $data);
-    }

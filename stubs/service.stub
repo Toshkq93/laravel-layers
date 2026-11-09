@@ -6,9 +6,13 @@ namespace {{ namespace }};
 
 {{ imports }}
 
-class {{ class }}
+/**
+ * @extends {{ extends }}<{{ repository }}, {{ output }}>
+ */
+class {{ class }} extends {{ extends }}
 {
-{{ constructor }}
-
-{{ methods }}
+    public function __construct({{ repository }} $repository)
+    {
+        parent::__construct($repository);
+    }
 }

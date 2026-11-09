@@ -4,14 +4,15 @@ declare(strict_types=1);
 
 namespace Toshkq93\LaravelLayers\Generation\Generators;
 
-use Illuminate\Contracts\Pagination\LengthAwarePaginator;
-use Toshkq93\LaravelLayers\Generation\Action;
 use Toshkq93\LaravelLayers\Generation\Blueprint;
 use Toshkq93\LaravelLayers\Generation\Imports;
 use Toshkq93\LaravelLayers\Generation\Layer;
+use Toshkq93\LaravelLayers\Services\CrudService;
 
 /**
- * Business logic. Works only with its own repository and DTOs.
+ * Business logic. The CRUD methods are inherited from the base service,
+ * which delegates them to the model's repository; the generated class
+ * only passes the typed repository to it.
  */
 class ServiceGenerator extends Generator
 {
@@ -25,28 +26,13 @@ class ServiceGenerator extends Generator
         $naming = $blueprint->naming;
         $namespace = $naming->namespace(Layer::Service);
         $imports = new Imports($namespace);
-        $hasRepository = $blueprint->has(Layer::Repository);
-
-        $dependencies = $hasRepository ? ['repository' => $imports->add($naming->fqcn(Layer::Repository))] : [];
-        $output = $imports->add($naming->fqcn(Layer::Output));
-
-        $methods = $this->methods($blueprint, function (Action $action) use ($blueprint, $naming, $imports, $output, $hasRepository) {
-            if ($action === Action::Index) {
-                $imports->add(LengthAwarePaginator::class);
-            }
-
-            return [
-                'input' => $imports->add($naming->fqcn(Layer::Input, $action)),
-                'output' => $output,
-                'call' => $hasRepository ? $this->repositoryCall($action, $blueprint) : $this->notImplemented($imports),
-            ];
-        });
 
         $contents = $this->stubs->render('service', [
             'namespace' => $namespace,
             'class' => $naming->class(Layer::Service),
-            'constructor' => $this->constructor($dependencies),
-            'methods' => $methods,
+            'extends' => $imports->add($naming->extends(Layer::Service) ?? CrudService::class),
+            'repository' => $imports->add($naming->fqcn(Layer::Repository)),
+            'output' => $imports->add($naming->fqcn(Layer::Output)),
             'imports' => $imports->render(),
         ]);
 

@@ -4,7 +4,7 @@
 
         $this->getJson(route('{{ route }}', ${{ variable }}->getKey()))
             ->assertOk()
-            ->assertJsonPath('{{ key }}', ${{ variable }}->getKey());
+            ->assertJsonPath('{{ data }}{{ key }}', ${{ variable }}->getKey());
     }
 
     public function test_show_returns_404_for_missing_{{ singular }}(): void

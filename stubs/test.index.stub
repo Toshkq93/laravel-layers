@@ -5,7 +5,7 @@
         $this->getJson(route('{{ route }}', ['per_page' => 2]))
             ->assertOk()
             ->assertJsonCount(2, 'data')
-            ->assertJsonPath('total', 3);
+            ->assertJsonPath('{{ total }}', 3);
     }
 
     public function test_index_validates_per_page(): void

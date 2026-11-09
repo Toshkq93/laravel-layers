@@ -18,6 +18,15 @@ final class Naming
 
     public const PROPERTIES_SNAKE = 'snake';
 
+    /** Layers added after 0.1: used when a published config/layers.php does not list them. */
+    private const ADDED_LATER = [
+        'resource' => [
+            'namespace' => 'App\\Http\\Resources',
+            'suffix' => 'Resource',
+            'extends' => \Toshkq93\LaravelLayers\Http\Resources\DataResource::class,
+        ],
+    ];
+
     /**
      * @param  array<string, array{namespace: string, suffix?: string, extends?: string|null}>  $layers
      * @param  'camel'|'snake'  $properties
@@ -95,6 +104,16 @@ final class Naming
         return $this->namespace(Layer::Output).'\\'.class_basename($modelClass).$this->suffix(Layer::Output);
     }
 
+    /**
+     * API resource of any model (for relations): App\Models\User -> App\Http\Resources\UserResource.
+     *
+     * @return class-string
+     */
+    public function resourceFor(string $modelClass): string
+    {
+        return $this->namespace(Layer::Resource).'\\'.class_basename($modelClass).$this->suffix(Layer::Resource);
+    }
+
     public function suffix(Layer $layer): string
     {
         return $this->config($layer)['suffix'] ?? '';
@@ -136,6 +155,7 @@ final class Naming
     private function config(Layer $layer): array
     {
         return $this->layers[$layer->value]
+            ?? self::ADDED_LATER[$layer->value]
             ?? throw new InvalidArgumentException("Layer [{$layer->value}] is not configured in config/layers.php.");
     }
 }

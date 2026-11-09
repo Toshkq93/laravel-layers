@@ -1,9 +1,0 @@
-    /**
-     * @return LengthAwarePaginator<int, {{ output }}>
-     */
-    public function paginate(int $perPage, int $page = 1): LengthAwarePaginator
-    {
-        return $this->toPaginator(
-            $this->query()->orderBy('{{ key }}')->paginate(perPage: $perPage, page: $page),
-        );
-    }

@@ -4,16 +4,18 @@ Layered architecture for Laravel APIs, plus a generator that builds every layer 
 
 ```
 route ─► middleware ─► input DTO (validation + gate) ─► controller ─► service ─► repository ─► output DTO
-                       InputDataInterface                                                    OutputDataInterface
+                       InputDataInterface                      │                             OutputDataInterface
+                                                               └─► API resource (JSON) ◄─ output DTO
 ```
 
 - **Route** (`routes/api.php`) is the entry point.
 - **Middleware** holds route access conditions.
 - **Input DTO** ([spatie/laravel-data](https://github.com/spatie/laravel-data)) describes the request fields and their validation. Its `authorize()` runs the gate before the controller is reached.
-- **Controller** is thin. It receives a validated DTO and calls the service.
+- **Controller** is thin. It receives a validated DTO, calls the service and returns the result through an API resource.
 - **Service** holds business logic. It may call other services and works with data only through its repository.
 - **Repository** stores SQL queries. It returns an output DTO, or a collection or paginator of them. Eloquent models never leave the repository.
-- **Output DTO** is what the rest of the code works with. Returned from a controller, it is serialized to JSON.
+- **Output DTO** is what the rest of the code works with.
+- **API resource** (`JsonResource`) wraps the output DTO and describes the JSON sent to the client, field by field.
 
 Every layer is optional: generate the ones you need, in one run or several.
 
@@ -52,10 +54,10 @@ php artisan make:layers Post --all
  app/Data/Input/Post/UpdatePostData.php ....... created
  app/Data/Input/Post/DestroyPostData.php ...... created
  app/Data/Output/PostData.php ................. created
+ app/Http/Resources/PostResource.php .......... created
  app/Repositories/PostRepository.php .......... created
  app/Services/PostService.php ................. created
  app/Http/Controllers/Api/PostController.php .. created
- app/Policies/PostPolicy.php .................. created
  app/Http/Middleware/PostMiddleware.php ....... created
  database/factories/PostFactory.php ........... created
  tests/Feature/PostApiTest.php ................ created
@@ -63,7 +65,7 @@ php artisan make:layers Post --all
  bootstrap/app.php ............................ api routes registered
 ```
 
-The result is a working CRUD API at `/api/posts` with passing tests (`php artisan test --filter=PostApiTest`). Requests are validated against the table schema, access goes through the policy, and responses are typed DTOs.
+The result is a working CRUD API at `/api/posts` with passing tests (`php artisan test --filter=PostApiTest`). Requests are validated against the table schema, and responses go through an API resource built from a typed DTO. Add `--gate` to also check access through a policy: `php artisan make:layers Post --all --gate`.
 
 ## Command
 
@@ -77,6 +79,7 @@ php artisan make:layers {model} [options]
 |---|---|
 | `--input` | One input DTO per action, with validation |
 | `--output` | Output DTO |
+| `--resource` | API resource the controller returns |
 | `--repository` | Repository |
 | `--service` | Service |
 | `--controller` | Controller |
@@ -85,12 +88,12 @@ php artisan make:layers {model} [options]
 | `--route` | Routes in `routes/api.php` |
 | `--factory` | Model factory with Faker values that match the schema and pass the validation |
 | `--test` | Feature tests for the API (the factory is generated too when missing) |
-| `--all` | Every layer above |
+| `--all` | Every layer above except `--gate`. Combine them for policies: `--all --gate` |
 | `--actions=index,show` | Limits the actions. Default: `index,show,store,update,destroy` |
 | `--force` | Overwrites existing files and replaces the route block |
 | `--dry-run` | Shows what would be generated without writing (`-v` also prints the code) |
 
-When no layer option is given, the command asks for layers and actions interactively. With `--no-interaction` it generates every layer.
+When no layer option is given, the command asks for layers and actions interactively (the gate is unchecked by default). With `--no-interaction` it generates every layer except the gate.
 
 ```bash
 # Only the data layer
@@ -113,7 +116,7 @@ php artisan make:layers Post --controller --force
 | `index` | `GET /posts` | `IndexPostData`: `page` (default 1), `per_page` (1–100, default 15; `$perPage` in PHP) | `paginate()` | `viewAny` |
 | `show` | `GET /posts/{post}` | `ShowPostData`: `id` | `findOrFail()` | `view` |
 | `store` | `POST /posts` | `StorePostData`: writable fields | `create()` | `create` |
-| `update` | `PATCH /posts/{post}` | `UpdatePostData`: `id` and writable fields, all optional | `update()` | `update` |
+| `update` | `PUT\|PATCH /posts/{post}` | `UpdatePostData`: `id` and writable fields, all optional | `update()` | `update` |
 | `destroy` | `DELETE /posts/{post}` | `DestroyPostData`: `id` | `delete()` | `delete` |
 
 ## Generated code
@@ -273,7 +276,48 @@ php artisan make:layers Post --all     # PostData gets $user
 
 Single relations (`belongsTo`, `hasOne`, `morphOne`, `hasOneThrough`) become `RelatedData|Optional|null`. Collection relations (`hasMany`, `belongsToMany`, `morphMany`, `morphToMany`, `hasManyThrough`) become `Collection|Optional`.
 
+### API resource
+
+The controller returns the output DTO wrapped in a Laravel API resource. Keys are written explicitly, so the resource is the place to see and change the response contract:
+
+```php
+/**
+ * @mixin PostData
+ *
+ * @property PostData $resource
+ */
+class PostResource extends DataResource
+{
+    /**
+     * @return array<string, mixed>
+     */
+    public function toArray(Request $request): array
+    {
+        return [
+            'id' => $this->id,
+            'user_id' => $this->userId,
+            'title' => $this->title,
+            'status' => $this->status,
+            'published_at' => $this->publishedAt?->format(DATE_ATOM),
+            // ...
+            'user' => $this->whenLoadedData($this->user, UserResource::class),
+        ];
+    }
+}
+```
+
+- `$this->userId` reads the DTO property. Keys are the column names.
+- Dates use `DATE_ATOM`, the format laravel-data uses, so the values look the same as when the DTO is returned.
+- Relations go through the related model's resource. `whenLoadedData()` from the base `DataResource` leaves a relation out when it is not loaded (`Optional` in the DTO; `whenLoaded()` only works with models). A loaded empty relation becomes `null` or `[]`.
+- A relation is added only when the related resource exists. Otherwise the command prints a hint. Generate the related resource first: `php artisan make:layers User --output --resource`.
+
+Responses are in the Laravel resource format: a single record is wrapped in `data`, and a paginated list has `data`, `links` and `meta` (`meta.total`, `meta.current_page`, ...). `store` returns `201 Created`.
+
+Without a resource (`--resource` not generated and the class does not exist), the controller returns the output DTO itself, which laravel-data serializes without the `data` wrapper.
+
 ### Repository
+
+The CRUD methods come from the base `EloquentRepository`, so the generated repository only names its model and output DTO:
 
 ```php
 /**
@@ -284,30 +328,24 @@ class PostRepository extends EloquentRepository
     protected function model(): string { return Post::class; }
 
     protected function output(): string { return PostData::class; }
-
-    /** @return LengthAwarePaginator<int, PostData> */
-    public function paginate(int $perPage, int $page = 1): LengthAwarePaginator
-    {
-        return $this->toPaginator(
-            $this->query()->orderBy('id')->paginate(perPage: $perPage, page: $page),
-        );
-    }
-
-    public function findOrFail(int $id): PostData
-    {
-        return $this->findOneOrFail($id);
-    }
-
-    public function create(StorePostData $data): PostData
-    {
-        return $this->createFrom($data);
-    }
-
-    // update(), delete()
 }
 ```
 
-Add your own queries the same way: build them with `$this->query()` and convert the result with `toOutput()`, `toCollection()` or `toPaginator()`.
+Inherited public methods: `paginate($perPage = 15, $page = 1)`, `find($id)`, `findOrFail($id)`, `create(InputDataInterface)`, `update($id, InputDataInterface)`, `delete($id)`. They return output DTOs (or a paginator of them), typed through the `@extends` generics for IDEs and static analysis.
+
+`paginate()` sorts by the primary key. Change the sort with properties, or override `paginateQuery()` to filter:
+
+```php
+protected ?string $orderBy = 'created_at';
+protected string $orderDirection = 'desc';
+
+protected function paginateQuery(): Builder
+{
+    return parent::paginateQuery()->where('published', true);
+}
+```
+
+Add your own queries with `$this->query()` and convert the result with `toOutput()`, `toCollection()` or `toPaginator()`.
 
 Relations listed in `$with` are eager-loaded by every query of the repository, so they appear in every response. The generated repository leaves `$with` empty and lists the available relations in a comment:
 
@@ -333,45 +371,68 @@ public function publishedBy(int $userId): Collection
 
 ### Service and controller
 
+The service extends `CrudService`, which delegates `paginate()`, `find()`, `findOrFail()`, `create()`, `update()` and `delete()` to the repository. The generated class only passes the typed repository:
+
 ```php
-class PostService
+/**
+ * @extends CrudService<PostRepository, PostData>
+ */
+class PostService extends CrudService
 {
-    public function __construct(
-        private readonly PostRepository $repository,
-    ) {}
-
-    public function store(StorePostData $data): PostData
+    public function __construct(PostRepository $repository)
     {
-        return $this->repository->create($data);
+        parent::__construct($repository);
     }
-
-    public function update(UpdatePostData $data): PostData
-    {
-        return $this->repository->update($data->id, $data);
-    }
-
-    // index(), show(), destroy()
 }
+```
 
+Put business logic here: add methods, or override a CRUD method and call `parent::` or `$this->repository`:
+
+```php
+public function create(InputDataInterface $data): PostData
+{
+    $post = parent::create($data);
+
+    event(new PostCreated($post->id));
+
+    return $post;
+}
+```
+
+The controller unpacks the DTO, calls the service and wraps the result in the resource:
+
+```php
 class PostController extends Controller
 {
     public function __construct(
         private readonly PostService $service,
     ) {}
 
-    public function store(StorePostData $data): PostData
+    public function index(IndexPostData $data): AnonymousResourceCollection
     {
-        return $this->service->store($data);   // 201 Created
+        return PostResource::collection($this->service->paginate($data->perPage, $data->page));
+    }
+
+    public function store(StorePostData $data): JsonResponse
+    {
+        return PostResource::make($this->service->create($data))
+            ->response()
+            ->setStatusCode(Response::HTTP_CREATED);
+    }
+
+    public function update(UpdatePostData $data): PostResource
+    {
+        return PostResource::make($this->service->update($data->id, $data));
     }
 
     public function destroy(DestroyPostData $data): Response
     {
-        $this->service->destroy($data);
+        $this->service->delete($data->id);
 
         return response()->noContent();        // 204 No Content
     }
 
-    // index(), show(), update()
+    // show(): PostResource::make($this->service->findOrFail($data->id))
 }
 ```
 
@@ -398,19 +459,57 @@ class PostPolicy
 
 ### Routes
 
-The routes are added in a marked block. On a second run the block is skipped; with `--force` it is replaced.
+Each model gets one `Route::apiResource()` line in a marked block. On a second run the block is skipped; with `--force` it is replaced in place.
 
 ```php
 // layers:Post:start
-Route::middleware(PostMiddleware::class)->group(function () {
-    Route::get('posts', [PostController::class, 'index'])->name('posts.index');
-    Route::get('posts/{post}', [PostController::class, 'show'])->name('posts.show');
-    Route::post('posts', [PostController::class, 'store'])->name('posts.store');
-    Route::patch('posts/{post}', [PostController::class, 'update'])->name('posts.update');
-    Route::delete('posts/{post}', [PostController::class, 'destroy'])->name('posts.destroy');
-});
+Route::apiResource('posts', PostController::class);
 // layers:Post:end
 ```
+
+`->only([...])` is added when not every action is generated, `->middleware(...)` when the middleware is available, and `->parameters([...])` when the route parameter differs from the one Laravel derives (`BlogPost` → `blog-posts/{blogPost}`):
+
+```php
+// layers:BlogPost:start
+Route::apiResource('blog-posts', BlogPostController::class)
+    ->only(['index', 'show'])
+    ->parameters(['blog-posts' => 'blogPost'])
+    ->middleware(BlogPostMiddleware::class);
+// layers:BlogPost:end
+```
+
+Route names stay `posts.index`, `posts.show`, and so on. `update` answers both `PUT` and `PATCH`.
+
+#### Shared route group
+
+Set `routes.group` in the config to put the resources of every model into one group:
+
+```php
+'routes' => [
+    'file' => 'routes/api.php',
+    'group' => [
+        'prefix' => 'v1',
+        'middleware' => ['auth:sanctum'],
+        'as' => 'v1.',        // route name prefix: v1.posts.index
+    ],
+],
+```
+
+```php
+// layers:start
+Route::prefix('v1')->middleware(['auth:sanctum'])->name('v1.')->group(function () {
+    // layers:Post:start
+    Route::apiResource('posts', PostController::class);
+    // layers:Post:end
+
+    // layers:User:start
+    Route::apiResource('users', UserController::class);
+    // layers:User:end
+});
+// layers:end
+```
+
+The group line is written once, with the first model. Later models are added inside the group. Changing the config afterwards does not rewrite the group line, so edit it by hand. Blocks generated before the group was configured stay where they are. The generated tests use the prefixed route names (`v1.posts.store`).
 
 If `routes/api.php` is not registered in `bootstrap/app.php` (the default in Laravel 11+ skeletons), the command adds `api: __DIR__.'/../routes/api.php'` next to `web:`.
 
@@ -455,7 +554,7 @@ Because `$model` is set explicitly, the tests call `PostFactory::new()` and the 
 
 | Action | Tests |
 |---|---|
-| `index` | Pagination (`per_page`, `total`); `per_page` above the limit returns 422 |
+| `index` | Pagination (`per_page`, `meta.total`); `per_page` above the limit returns 422 |
 | `show` | Returns the record; a missing key returns 404 |
 | `store` | Creates from `PostFactory::new()->raw()` and checks the response and the database; an empty payload returns 422 for every required field; a duplicate value of the first unique column returns 422 |
 | `update` | A partial update changes one field in the response and the database; a missing key returns 404; a record may keep its own value of the first unique column, but taking another record's value returns 422 |
@@ -469,7 +568,7 @@ public function test_update_changes_post(): void
 
     $this->patchJson(route('posts.update', $post->getKey()), $payload)
         ->assertOk()
-        ->assertJsonPath('title', $payload['title']);
+        ->assertJsonPath('data.title', $payload['title']);
 
     $this->assertDatabaseHas('posts', [
         'id' => $post->getKey(),
@@ -478,17 +577,18 @@ public function test_update_changes_post(): void
 }
 ```
 
-The tests send requests as a guest, which the generated policy allows. Once the policy requires a user, authenticate in `setUp()`, for example with `$this->actingAs(UserFactory::new()->create())`. The tests call routes by name (`posts.store`), so they expect the routes generated by `--route`.
+The tests send requests as a guest. With `--gate`, the generated policy allows guests; once it requires a user, authenticate in `setUp()`, for example with `$this->actingAs(UserFactory::new()->create())`. The tests call routes by name (`posts.store`), so they expect the routes generated by `--route`. They read the response in the resource format (`data.title`, `meta.total`), or at the top level when the model has no resource.
 
 ## How layers connect
 
 A layer counts as **available** when it is generated in the current run or its class already exists. This lets you generate layers in several runs and still get code that is wired together.
 
-- The **controller** calls the service if one is available. Otherwise it calls the repository directly. If neither exists, its methods throw `LogicException('Not implemented.')`.
-- The **service** calls the repository if one is available. Otherwise its methods throw `LogicException`.
-- The **controller, service and repository** cannot compile without DTOs. If the input or output DTO classes do not exist, they are generated as well, and the command reports it.
+- The **controller** calls the service if one is available. Otherwise it calls the repository directly, with the same method calls. If neither exists, its methods throw `LogicException('Not implemented.')`.
+- The **service** needs the repository. If it does not exist, it is generated as well.
+- The **controller** returns the resource if one is available. Otherwise it returns the output DTO.
+- The **controller** needs input and output DTOs, the **service**, **repository** and **resource** need the output DTO. Missing DTOs are generated as well, and the command reports every layer added this way.
 - **Input DTOs** get `authorize()` only when a policy is available.
-- **Routes** are written only when the controller is available, and are grouped under the middleware when it is available.
+- **Routes** are written only when the controller is available, and get `->middleware(...)` when the middleware is available.
 - **Tests** need the factory. If it does not exist, it is generated as well.
 
 ## Schema → types and validation
@@ -558,8 +658,9 @@ public ?string $code2fa;
 'layers' => [
     'input'      => ['namespace' => 'App\\Data\\Input', 'suffix' => 'Data', 'extends' => InputData::class],
     'output'     => ['namespace' => 'App\\Data\\Output', 'suffix' => 'Data', 'extends' => OutputData::class],
+    'resource'   => ['namespace' => 'App\\Http\\Resources', 'suffix' => 'Resource', 'extends' => DataResource::class],
     'controller' => ['namespace' => 'App\\Http\\Controllers\\Api', 'suffix' => 'Controller', 'extends' => 'App\\Http\\Controllers\\Controller'],
-    'service'    => ['namespace' => 'App\\Services', 'suffix' => 'Service'],
+    'service'    => ['namespace' => 'App\\Services', 'suffix' => 'Service', 'extends' => CrudService::class],
     'repository' => ['namespace' => 'App\\Repositories', 'suffix' => 'Repository', 'extends' => EloquentRepository::class],
     'middleware' => ['namespace' => 'App\\Http\\Middleware', 'suffix' => 'Middleware'],
     'policy'     => ['namespace' => 'App\\Policies', 'suffix' => 'Policy'],
@@ -572,7 +673,10 @@ public ?string $code2fa;
 
 'properties' => 'camel',
 
-'routes' => ['file' => 'routes/api.php'],
+'routes' => [
+    'file' => 'routes/api.php',
+    'group' => ['prefix' => null, 'middleware' => [], 'as' => null],   // see "Shared route group"
+],
 
 'actions' => ['index', 'show', 'store', 'update', 'destroy'],
 ```
@@ -594,22 +698,24 @@ Gate::policy(Post::class, \App\Domain\Policies\PostPolicy::class);
 php artisan vendor:publish --tag=layers-stubs
 ```
 
-Stubs are copied to `stubs/layers/`. A stub found there takes precedence over the package one. Each layer has a class stub (`controller.stub`) and one method stub per action (`controller.store.stub`, `controller.update.stub`, ...). Placeholders look like `{{ name }}`:
+Stubs are copied to `stubs/layers/`. A stub found there takes precedence over the package one. Each layer has a class stub (`controller.stub`) and, except the repository and the service, one method stub per action (`controller.store.stub`, `controller.update.stub`, ...). Placeholders look like `{{ name }}`:
 
 | Stub | Placeholders |
 |---|---|
 | `input`, `output` | `namespace`, `imports`, `attributes` (class-level `#[MapName]`), `class`, `extends`, `body` |
+| `resource` | `namespace`, `imports`, `class`, `extends`, `output`, `fields` |
 | `input.authorize` | `parameters`, `gate`, `ability`, `arguments` |
-| `repository` | `namespace`, `imports`, `class`, `extends`, `model`, `output`, `with`, `methods` |
-| `repository.{action}` | `input`, `output`, `keyType`, `key` |
-| `service`, `controller` | `namespace`, `imports`, `class`, `constructor`, `methods` (controller also has `extends`) |
-| `service.{action}`, `controller.{action}` | `input`, `output`, `call` |
+| `repository` | `namespace`, `imports`, `class`, `extends`, `model`, `output`, `with` |
+| `service` | `namespace`, `imports`, `class`, `extends`, `repository`, `output` |
+| `controller` | `namespace`, `imports`, `class`, `extends`, `constructor`, `methods` |
+| `controller.{action}` | `input`, `output`, `call` (controller without a resource) |
+| `controller.resource.{action}` | `input`, `resource`, `call` (controller with a resource) |
 | `policy` | `namespace`, `imports`, `class`, `model`, `methods` |
 | `policy.{action}` | `keyType` |
 | `middleware` | `namespace`, `class`, `model` |
 | `factory` | `namespace`, `imports`, `class`, `extends`, `model`, `definition` |
 | `test` | `namespace`, `imports`, `class`, `extends`, `model`, `methods` |
-| `test.{action}` | `factory`, `route`, `variable`, `singular`, `plural`, `table`, `key`, `missingKey`; plus `assertions`, `unique` (store, update), `validation` (store), `payload`, `database` (update), `deleted` (destroy) |
+| `test.{action}` | `data` (`data.` or empty), `total` (`meta.total` or `total`), `factory`, `route`, `variable`, `singular`, `plural`, `table`, `key`, `missingKey`; plus `assertions`, `unique` (store, update), `validation` (store), `payload`, `database` (update), `deleted` (destroy) |
 | `test.store.validation` | the common `test.{action}` placeholders and `fields` |
 | `test.store.unique`, `test.update.unique` | the action's placeholders and `field` (the first unique column); rendered into `{{ unique }}` |
 
@@ -621,20 +727,35 @@ The generated code is built on a few package classes, which you can also use by 
 
 **Base DTOs:** `Toshkq93\LaravelLayers\Data\InputData` and `OutputData`. Both extend `Spatie\LaravelData\Data` and implement the matching contract, so everything from laravel-data is available: validation attributes, `rules()`, casts, transformers, lazy properties.
 
-**`Toshkq93\LaravelLayers\Repositories\EloquentRepository`:** a base repository with protected helpers.
+**`Toshkq93\LaravelLayers\Repositories\EloquentRepository`:** a base repository.
+
+Public CRUD methods:
 
 | Method | Returns |
 |---|---|
+| `paginate(int $perPage = 15, int $page = 1)` | Paginator of output DTOs, built from `paginateQuery()` |
+| `find($id)` | Output DTO or `null` |
+| `findOrFail($id)` | Output DTO, or throws `ModelNotFoundException` (404) |
+| `create(InputDataInterface)` | Output DTO. The model is re-read so DB defaults are included |
+| `update($id, InputDataInterface)` | Output DTO. Only the attributes present in the DTO are updated |
+| `delete($id)` | `bool` |
+
+Configuration and protected helpers for your own queries:
+
+| Member | Returns |
+|---|---|
 | `$with` | Relations eager-loaded by `query()` (default `[]`) |
+| `$orderBy`, `$orderDirection` | Sort of `paginate()` (default: primary key, `asc`) |
+| `paginateQuery()` | `Builder` behind `paginate()`; override to filter |
 | `query()` | `Builder` for the model, with `$with` applied |
 | `toOutput(?Model)` | Output DTO or `null` |
 | `toCollection(iterable)` | `Collection` of output DTOs |
 | `toPaginator(LengthAwarePaginator)` | Paginator of output DTOs |
-| `findOne($id)` | Output DTO or `null` |
-| `findOneOrFail($id)` | Output DTO, or throws `ModelNotFoundException` (404) |
-| `createFrom(InputDataInterface)` | Output DTO. The model is re-read so DB defaults are included |
-| `updateFrom($id, InputDataInterface)` | Output DTO. Only the attributes present in the DTO are updated |
-| `deleteOne($id)` | `bool` |
+| `findOne()`, `findOneOrFail()`, `createFrom()`, `updateFrom()`, `deleteOne()` | What the public CRUD methods call; usable from your own methods |
+
+**`Toshkq93\LaravelLayers\Http\Resources\DataResource`:** a base `JsonResource` for resources around output DTOs. `whenLoadedData($value, Resource::class)` returns the related resource (or a collection of them), `null` for an empty relation, and leaves an unloaded (`Optional`) relation out of the response.
+
+**`Toshkq93\LaravelLayers\Services\CrudService`:** a base service. Its constructor takes the repository (available as `$this->repository`). `paginate()`, `find()`, `findOrFail()`, `create()`, `update()` and `delete()` have the same signatures as in the repository and delegate to it. Set `layers.service.extends` to your own subclass to share logic between services.
 
 ## Limitations
 

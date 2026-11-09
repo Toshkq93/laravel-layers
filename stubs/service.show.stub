@@ -1,4 +1,0 @@
-    public function show({{ input }} $data): {{ output }}
-    {
-        return {{ call }};
-    }

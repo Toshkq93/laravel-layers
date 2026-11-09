@@ -13,6 +13,7 @@ use Toshkq93\LaravelLayers\Generation\Blueprint;
 use Toshkq93\LaravelLayers\Generation\Layer;
 use Toshkq93\LaravelLayers\Generation\LayerGenerator;
 use Toshkq93\LaravelLayers\Generation\Naming;
+use Toshkq93\LaravelLayers\Generation\RouteGroup;
 use Toshkq93\LaravelLayers\Generation\RouteWriter;
 use Toshkq93\LaravelLayers\Generation\StubRenderer;
 use Toshkq93\LaravelLayers\Schema\ModelInspector;
@@ -23,9 +24,10 @@ class MakeLayersCommand extends Command
 {
     protected $signature = 'make:layers
         {model : Model name (Post, Blog/Post) or its fully qualified class}
-        {--all : Generate every layer}
+        {--all : Generate every layer except the gate (add --gate for policies)}
         {--input : Input DTOs, one per action (validation)}
         {--output : Output DTO}
+        {--resource : API resource returned by the controller}
         {--repository : Repository}
         {--service : Service}
         {--controller : Controller}
@@ -38,12 +40,13 @@ class MakeLayersCommand extends Command
         {--force : Overwrite existing files and the route block}
         {--dry-run : Show what would be generated without writing anything}';
 
-    protected $description = 'Generate architectural layers (DTOs, repository, service, controller, gate, middleware, routes, factory, tests) for a model';
+    protected $description = 'Generate architectural layers (DTOs, API resources, repository, service, controller, gate, middleware, routes, factory, tests) for a model';
 
     /** Command option => layer */
     private const OPTIONS = [
         'input' => Layer::Input,
         'output' => Layer::Output,
+        'resource' => Layer::Resource,
         'repository' => Layer::Repository,
         'service' => Layer::Service,
         'controller' => Layer::Controller,
@@ -53,6 +56,9 @@ class MakeLayersCommand extends Command
         'factory' => Layer::Factory,
         'test' => Layer::Test,
     ];
+
+    /** Layers left out of --all and the defaults: generated only when asked for. */
+    private const OPT_IN = [Layer::Policy];
 
     public function handle(Filesystem $files, ModelInspector $inspector): int
     {
@@ -80,7 +86,7 @@ class MakeLayersCommand extends Command
             return self::SUCCESS;
         }
 
-        $selected = new Blueprint($definition, $naming, $layers, $actions);
+        $selected = new Blueprint($definition, $naming, $layers, $actions, RouteGroup::fromConfig(config('layers.routes.group')));
         $blueprint = $selected->withImplicitLayers();
 
         foreach ($blueprint->layers as $layer) {
@@ -141,26 +147,23 @@ class MakeLayersCommand extends Command
     /** @return list<Layer> */
     private function layers(): array
     {
-        if ($this->option('all')) {
-            return array_values(self::OPTIONS);
-        }
-
+        $defaults = array_filter(self::OPTIONS, fn (Layer $l) => ! in_array($l, self::OPT_IN, true));
         $layers = [];
 
         foreach (self::OPTIONS as $option => $layer) {
-            if ($this->option($option)) {
+            if ($this->option($option) || ($this->option('all') && isset($defaults[$option]))) {
                 $layers[] = $layer;
             }
         }
 
         if ($layers !== [] || ! $this->input->isInteractive()) {
-            return $layers ?: array_values(self::OPTIONS);
+            return $layers ?: array_values($defaults);
         }
 
         $chosen = multiselect(
             label: 'Which layers should be generated?',
             options: collect(self::OPTIONS)->mapWithKeys(fn (Layer $l, string $option) => [$option => $l->label()])->all(),
-            default: array_keys(self::OPTIONS),
+            default: array_keys($defaults),
             scroll: 10,
         );
 

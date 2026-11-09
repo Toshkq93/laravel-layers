@@ -11,8 +11,10 @@ use Toshkq93\LaravelLayers\Generation\Action;
 use Toshkq93\LaravelLayers\Generation\Blueprint;
 use Toshkq93\LaravelLayers\Generation\Layer;
 use Toshkq93\LaravelLayers\Generation\Naming;
+use Toshkq93\LaravelLayers\Generation\RouteGroup;
 use Toshkq93\LaravelLayers\Generation\RouteWriter;
 use Toshkq93\LaravelLayers\Schema\ModelInspector;
+use Toshkq93\LaravelLayers\Tests\Fixtures\OpenArticle;
 use Toshkq93\LaravelLayers\Tests\Fixtures\Post;
 use Toshkq93\LaravelLayers\Tests\TestCase;
 
@@ -44,35 +46,116 @@ class RouteWriterTest extends TestCase
         parent::tearDown();
     }
 
-    /** @param list<Action> $actions */
-    private function blueprint(array $layers, array $actions = []): Blueprint
+    /**
+     * @param  list<Action>  $actions
+     * @param  class-string  $model
+     */
+    private function blueprint(array $layers, array $actions = [], ?RouteGroup $group = null, string $model = Post::class): Blueprint
     {
-        $definition = (new ModelInspector)->inspect(Post::class);
+        $definition = (new ModelInspector)->inspect($model);
         $naming = new Naming($definition, config('layers.layers'), 'App\\', $this->dir.'/app');
 
-        return new Blueprint($definition, $naming, $layers, $actions ?: Action::cases());
+        return new Blueprint($definition, $naming, $layers, $actions ?: Action::cases(), $group ?? new RouteGroup);
     }
 
-    public function test_block_with_middleware(): void
+    private function group(): RouteGroup
+    {
+        return RouteGroup::fromConfig(['prefix' => '/v1/', 'middleware' => ['auth:sanctum'], 'as' => 'v1.']);
+    }
+
+    public function test_block_for_all_actions_is_one_line(): void
+    {
+        $this->assertSame(<<<'PHP'
+            // layers:Post:start
+            Route::apiResource('posts', PostController::class);
+            // layers:Post:end
+            PHP, $this->writer->block($this->blueprint([Layer::Route])));
+    }
+
+    public function test_block_with_actions_and_middleware(): void
     {
         $block = $this->writer->block($this->blueprint([Layer::Route, Layer::Middleware], [Action::Index, Action::Update]));
 
         $this->assertSame(<<<'PHP'
             // layers:Post:start
-            Route::middleware(PostMiddleware::class)->group(function () {
-                Route::get('posts', [PostController::class, 'index'])->name('posts.index');
-                Route::patch('posts/{post}', [PostController::class, 'update'])->name('posts.update');
-            });
+            Route::apiResource('posts', PostController::class)
+                ->only(['index', 'update'])
+                ->middleware(PostMiddleware::class);
             // layers:Post:end
             PHP, $block);
     }
 
-    public function test_block_without_middleware(): void
+    public function test_block_maps_compound_parameter(): void
     {
-        $block = $this->writer->block($this->blueprint([Layer::Route], [Action::Show]));
+        Schema::create('articles', function (Table $table) {
+            $table->id();
+        });
 
-        $this->assertStringContainsString("\nRoute::get('posts/{post}', [PostController::class, 'show'])->name('posts.show');\n", $block);
-        $this->assertStringNotContainsString('middleware', $block);
+        $block = $this->writer->block($this->blueprint([Layer::Route], model: OpenArticle::class));
+
+        $this->assertStringContainsString("Route::apiResource('open-articles', OpenArticleController::class)\n    ->parameters(['open-articles' => 'openArticle']);", $block);
+    }
+
+    public function test_generated_routes_register_resource_routes(): void
+    {
+        $path = $this->dir.'/routes/api.php';
+        $this->writer->write($this->blueprint([Layer::Route], [Action::Index, Action::Show, Action::Update], $this->group()), $path);
+
+        // Load the file the way Laravel would, with stub classes for the imports.
+        if (! class_exists('App\\Http\\Controllers\\Api\\PostController')) {
+            eval('namespace App\\Http\\Controllers\\Api; class PostController {}');
+        }
+
+        require $path;
+
+        $routes = app('router')->getRoutes();
+        $routes->refreshNameLookups();
+
+        $this->assertSame('v1/posts', $routes->getByName('v1.posts.index')->uri());
+        $this->assertSame('v1/posts/{post}', $routes->getByName('v1.posts.show')->uri());
+        $this->assertSame(['PUT', 'PATCH'], $routes->getByName('v1.posts.update')->methods());
+        $this->assertSame(['auth:sanctum'], $routes->getByName('v1.posts.show')->middleware());
+        $this->assertNull($routes->getByName('v1.posts.store'));
+    }
+
+    public function test_group_wraps_blocks_of_every_model(): void
+    {
+        Schema::create('articles', function (Table $table) {
+            $table->id();
+        });
+
+        $path = $this->dir.'/routes/api.php';
+
+        $this->assertSame(RouteWriter::CREATED, $this->writer->write($this->blueprint([Layer::Route], group: $this->group()), $path)['status']);
+        $this->assertSame(RouteWriter::CREATED, $this->writer->write($this->blueprint([Layer::Route], group: $this->group(), model: OpenArticle::class), $path)['status']);
+
+        $this->assertStringEndsWith(<<<'PHP'
+            // layers:start
+            Route::prefix('v1')->middleware(['auth:sanctum'])->name('v1.')->group(function () {
+                // layers:Post:start
+                Route::apiResource('posts', PostController::class);
+                // layers:Post:end
+
+                // layers:OpenArticle:start
+                Route::apiResource('open-articles', OpenArticleController::class)
+                    ->parameters(['open-articles' => 'openArticle']);
+                // layers:OpenArticle:end
+            });
+            // layers:end
+
+            PHP, file_get_contents($path));
+
+        // --force replaces the block in place, keeping the indentation.
+        $this->assertSame(RouteWriter::REPLACED, $this->writer->write($this->blueprint([Layer::Route], [Action::Index], $this->group()), $path, force: true)['status']);
+        $contents = file_get_contents($path);
+        $this->assertStringContainsString("    // layers:Post:start\n    Route::apiResource('posts', PostController::class)\n        ->only(['index']);\n    // layers:Post:end\n", $contents);
+        $this->assertSame(1, substr_count($contents, 'layers:start'));
+    }
+
+    public function test_route_names_in_tests_use_the_group_name_prefix(): void
+    {
+        $this->assertSame('v1.posts.show', $this->blueprint([Layer::Route], group: $this->group())->routeName(Action::Show));
+        $this->assertSame('posts.show', $this->blueprint([Layer::Route])->routeName(Action::Show));
     }
 
     public function test_creates_file_and_is_idempotent(): void

@@ -81,6 +81,9 @@ abstract class CrudService
         return $this->repository->update($id, $data);
     }
 
+    /**
+     * @throws \Illuminate\Database\Eloquent\ModelNotFoundException
+     */
     public function delete(int|string $id): bool
     {
         return $this->repository->delete($id);

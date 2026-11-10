@@ -2,7 +2,12 @@
     {
         ${{ variable }} = {{ factory }}::new()->create();
 
-        $this->deleteJson(route('{{ route }}', ${{ variable }}->getKey()))->assertNoContent();
+        $this->deleteJson(route('{{ route }}', ${{ variable }}->getRouteKey()))->assertNoContent();
 
         $this->{{ deleted }}(${{ variable }});
+    }
+
+    public function test_destroy_returns_404_for_missing_{{ singular }}(): void
+    {
+        $this->deleteJson(route('{{ route }}', {{ missingKey }}))->assertNotFound();
     }

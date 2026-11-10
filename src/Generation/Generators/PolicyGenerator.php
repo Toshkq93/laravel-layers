@@ -28,7 +28,7 @@ class PolicyGenerator extends Generator
         $imports = new Imports($namespace);
         $imports->add(Authenticatable::class);
 
-        $methods = $this->methods($blueprint, fn () => ['keyType' => $blueprint->keyType()]);
+        $methods = $this->methods($blueprint, fn () => ['keyType' => $blueprint->routeKeyType()]);
 
         $contents = $this->stubs->render('policy', [
             'namespace' => $namespace,

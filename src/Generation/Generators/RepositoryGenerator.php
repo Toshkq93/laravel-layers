@@ -36,6 +36,21 @@ class RepositoryGenerator extends Generator
         return "    /**\n     * Relations loaded by every query and returned in the output DTO.\n     * Available: {$available}.\n     */\n    protected array \$with = [];";
     }
 
+    /**
+     * Records addressed by a route key other than the primary key (slug)
+     * are looked up by that column.
+     */
+    private function findBy(Blueprint $blueprint): string
+    {
+        $column = $blueprint->model->routeKeyName;
+
+        if ($column === null) {
+            return '';
+        }
+
+        return "    /**\n     * The routes address records by the model's route key.\n     */\n    protected ?string \$findBy = '{$column}';";
+    }
+
     public function generate(Blueprint $blueprint): array
     {
         $naming = $blueprint->naming;
@@ -52,7 +67,7 @@ class RepositoryGenerator extends Generator
             'class' => $naming->class(Layer::Repository),
             // CRUD comes from the base repository. Kept empty for stubs published before 0.2.
             'methods' => '',
-            'with' => $this->with($blueprint),
+            'with' => implode("\n\n", array_filter([$this->findBy($blueprint), $this->with($blueprint)])),
             'imports' => $imports->render(),
         ]);
 

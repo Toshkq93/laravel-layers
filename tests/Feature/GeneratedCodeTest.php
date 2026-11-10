@@ -19,6 +19,7 @@ use Toshkq93\LaravelLayers\Generation\StubRenderer;
 use Toshkq93\LaravelLayers\Schema\ModelInspector;
 use Toshkq93\LaravelLayers\Tests\Fixtures\Article;
 use Toshkq93\LaravelLayers\Tests\Fixtures\Comment;
+use Toshkq93\LaravelLayers\Tests\Fixtures\SluggedArticle;
 use Toshkq93\LaravelLayers\Tests\Fixtures\User;
 use Toshkq93\LaravelLayers\Tests\TestCase;
 
@@ -79,7 +80,7 @@ class GeneratedCodeTest extends TestCase
      * @param  list<Layer>  $layers
      * @return array{blueprint: Blueprint, files: list<\Toshkq93\LaravelLayers\Generation\GeneratedFile>}
      */
-    private function generate(array $layers, string $properties = Naming::PROPERTIES_CAMEL, array $outputsFirst = [], ?callable $patch = null, array $relatedLayers = [Layer::Output, Layer::Resource]): array
+    private function generate(array $layers, string $properties = Naming::PROPERTIES_CAMEL, array $outputsFirst = [], ?callable $patch = null, array $relatedLayers = [Layer::Output, Layer::Resource], string $main = Article::class): array
     {
         // A fresh namespace per test: generated classes cannot be redeclared.
         self::$namespace = 'Generated'.bin2hex(random_bytes(4));
@@ -116,10 +117,10 @@ class GeneratedCodeTest extends TestCase
         $fs->put($dir.'/Factories/UserFactory.php', "<?php\nnamespace {$ns}\\Factories;\n\nclass UserFactory extends \\Illuminate\\Database\\Eloquent\\Factories\\Factory\n{\n    protected \$model = \\".User::class."::class;\n\n    public function definition(): array\n    {\n        return [];\n    }\n}\n");
 
         // Output DTOs of related models, generated before the article's.
-        foreach ([...$outputsFirst, Article::class] as $model) {
+        foreach ([...$outputsFirst, $main] as $model) {
             $definition = (new ModelInspector)->inspect($model);
             $naming = new Naming($definition, $config, $ns.'\\', self::$dir, $properties);
-            $blueprint = new Blueprint($definition, $naming, $model === Article::class ? $layers : $relatedLayers, Action::cases());
+            $blueprint = new Blueprint($definition, $naming, $model === $main ? $layers : $relatedLayers, Action::cases());
             $blueprint = $blueprint->withImplicitLayers();
             $files = (new LayerGenerator(new StubRenderer))->generate($blueprint);
 
@@ -304,7 +305,7 @@ class GeneratedCodeTest extends TestCase
             'test_show_returns_article', 'test_show_returns_404_for_missing_article',
             'test_store_creates_article', 'test_store_validates_required_fields',
             'test_update_changes_article', 'test_update_returns_404_for_missing_article',
-            'test_destroy_deletes_article',
+            'test_destroy_deletes_article', 'test_destroy_returns_404_for_missing_article',
         ] as $method) {
             $this->assertStringContainsString("public function {$method}(): void", $test);
         }
@@ -316,6 +317,41 @@ class GeneratedCodeTest extends TestCase
         $this->assertStringContainsString("->assertJsonPath('data.id', \$article->getKey());", $test);
         $this->assertStringContainsString('$this->assertSoftDeleted($article);', $test);   // Article uses SoftDeletes
         $this->assertSame(0, $this->lint(collect($files)->firstWhere('layer', Layer::Test)->path));
+    }
+
+    public function test_records_addressed_by_route_key(): void
+    {
+        ['files' => $files] = $this->generate(Layer::cases(), main: SluggedArticle::class);
+        Gate::policy(SluggedArticle::class, self::$namespace.'\\Policies\\SluggedArticlePolicy');
+        Route::apiResource('articles', self::$namespace.'\\Http\\Controllers\\SluggedArticleController')
+            ->parameters(['articles' => 'sluggedArticle']);
+
+        $this->assertStringContainsString("protected ?string \$findBy = 'slug';", $this->contents($files, Layer::Repository));
+        $input = $this->contents($files, Layer::Input);
+        $this->assertStringContainsString("#[FromRouteParameter('sluggedArticle'), Hidden]\n    public string \$id;", $input);
+        $this->assertStringContainsString("ignore: new RouteParameterReference('sluggedArticle'), ignoreColumn: 'slug')", $input);
+        $this->assertStringContainsString('string $id): bool', $this->contents($files, Layer::Policy));
+        $test = $this->contents($files, Layer::Test);
+        $this->assertStringContainsString('$sluggedArticle->getRouteKey()', $test);
+        $this->assertStringContainsString("route('slugged-articles.show', 'missing')", $test);
+
+        foreach ($files as $file) {
+            $this->assertSame(0, $this->lint($file->path), "Syntax error in {$file->path}");
+        }
+
+        \DB::table('articles')->insert(['user_id' => 1, 'title' => 'Hello', 'slug' => 'hello']);
+        \DB::table('articles')->insert(['user_id' => 1, 'title' => 'Other', 'slug' => 'other']);
+
+        $this->getJson('articles/hello')->assertOk()->assertJsonPath('data.title', 'Hello');
+        $this->getJson('articles/1')->assertNotFound();
+
+        // Keeping its own slug passes the unique rule, taking another one does not.
+        $this->patchJson('articles/hello', ['slug' => 'hello', 'title' => 'New'])->assertOk()->assertJsonPath('data.title', 'New');
+        $this->patchJson('articles/hello', ['slug' => 'other'])->assertJsonValidationErrors(['slug']);
+
+        $this->deleteJson('articles/hello')->assertNoContent();
+        $this->deleteJson('articles/hello')->assertNotFound();
+        $this->assertSoftDeleted('articles', ['slug' => 'hello']);
     }
 
     public function test_unique_columns(): void

@@ -2,7 +2,7 @@
     {
         ${{ variable }} = {{ factory }}::new()->create();
 
-        $this->patchJson(route('{{ route }}', ${{ variable }}->getKey()), ['{{ field }}' => ${{ variable }}->getRawOriginal('{{ field }}')])
+        $this->patchJson(route('{{ route }}', ${{ variable }}->getRouteKey()), ['{{ field }}' => ${{ variable }}->getRawOriginal('{{ field }}')])
             ->assertOk();
     }
 
@@ -10,7 +10,7 @@
     {
         [$first, $second] = {{ factory }}::new()->count(2)->create();
 
-        $this->patchJson(route('{{ route }}', $second->getKey()), ['{{ field }}' => $first->getRawOriginal('{{ field }}')])
+        $this->patchJson(route('{{ route }}', $second->getRouteKey()), ['{{ field }}' => $first->getRawOriginal('{{ field }}')])
             ->assertUnprocessable()
             ->assertJsonValidationErrors(['{{ field }}']);
     }

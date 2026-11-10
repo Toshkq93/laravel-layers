@@ -7,6 +7,7 @@ namespace Toshkq93\LaravelLayers\Repositories;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Collection;
 use Toshkq93\LaravelLayers\Contracts\InputDataInterface;
 use Toshkq93\LaravelLayers\Contracts\OutputDataInterface;
@@ -37,6 +38,13 @@ abstract class EloquentRepository
      * @var list<string>
      */
     protected array $with = [];
+
+    /**
+     * Column find(), findOrFail(), update() and delete() look a record up by;
+     * null = the model's primary key. Set it to the model's route key
+     * (getRouteKeyName(), e.g. 'slug') when the API addresses records by it.
+     */
+    protected ?string $findBy = null;
 
     /**
      * Column paginate() sorts by; null = the model's primary key.
@@ -102,6 +110,9 @@ abstract class EloquentRepository
         return $this->updateFrom($id, $data);
     }
 
+    /**
+     * @throws \Illuminate\Database\Eloquent\ModelNotFoundException
+     */
     public function delete(int|string $id): bool
     {
         return $this->deleteOne($id);
@@ -166,7 +177,9 @@ abstract class EloquentRepository
      */
     protected function findOne(int|string $id): ?OutputDataInterface
     {
-        return $this->toOutput($this->query()->find($id));
+        $query = $this->query();
+
+        return $this->toOutput($this->findBy === null ? $query->find($id) : $query->where($this->findBy, $id)->first());
     }
 
     /**
@@ -176,7 +189,27 @@ abstract class EloquentRepository
      */
     protected function findOneOrFail(int|string $id): OutputDataInterface
     {
-        return $this->toOutput($this->query()->findOrFail($id));
+        return $this->toOutput($this->findModelOrFail($id));
+    }
+
+    /**
+     * The model by its key (or the $findBy column).
+     *
+     * @return TModel
+     *
+     * @throws \Illuminate\Database\Eloquent\ModelNotFoundException
+     */
+    protected function findModelOrFail(int|string $id): Model
+    {
+        $query = $this->query();
+
+        if ($this->findBy === null) {
+            return $query->findOrFail($id);
+        }
+
+        return $query->where($this->findBy, $id)->firstOr(
+            fn () => throw (new ModelNotFoundException)->setModel($this->model(), [$id]),
+        );
     }
 
     /**
@@ -204,7 +237,7 @@ abstract class EloquentRepository
      */
     protected function updateFrom(int|string $id, InputDataInterface $data): OutputDataInterface
     {
-        $model = $this->query()->findOrFail($id);
+        $model = $this->findModelOrFail($id);
 
         $model->update($data->toArray());
 
@@ -212,8 +245,14 @@ abstract class EloquentRepository
         return $this->toOutput($this->with === [] ? $model : $model->refresh());
     }
 
+    /**
+     * The model is loaded and deleted one by one, so model events and
+     * observers (deleting / deleted) run and SoftDeletes applies.
+     *
+     * @throws \Illuminate\Database\Eloquent\ModelNotFoundException
+     */
     protected function deleteOne(int|string $id): bool
     {
-        return (bool) $this->query()->whereKey($id)->delete();
+        return (bool) $this->findModelOrFail($id)->delete();
     }
 }

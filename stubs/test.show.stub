@@ -2,7 +2,7 @@
     {
         ${{ variable }} = {{ factory }}::new()->create();
 
-        $this->getJson(route('{{ route }}', ${{ variable }}->getKey()))
+        $this->getJson(route('{{ route }}', ${{ variable }}->getRouteKey()))
             ->assertOk()
             ->assertJsonPath('{{ data }}{{ key }}', ${{ variable }}->getKey());
     }

@@ -121,8 +121,52 @@ class EloquentRepositoryTest extends TestCase
         $this->assertSame('New', $updated->title);
 
         $this->assertTrue($this->repository->delete($id));
-        $this->assertFalse($this->repository->delete($id));
         $this->assertDatabaseMissing('posts', ['id' => $id]);
+    }
+
+    public function test_delete_missing_record_throws_not_found(): void
+    {
+        $this->expectException(ModelNotFoundException::class);
+
+        $this->repository->delete(999);
+    }
+
+    public function test_delete_fires_model_events(): void
+    {
+        $id = Post::create(['title' => 'Old'])->id;
+        $deleted = [];
+        Post::deleted(function (Post $post) use (&$deleted) {
+            $deleted[] = $post->id;
+        });
+
+        $this->repository->delete($id);
+
+        $this->assertSame([$id], $deleted);
+    }
+
+    public function test_find_by_another_column(): void
+    {
+        Schema::table('posts', fn (Blueprint $table) => $table->string('slug')->nullable());
+        $id = Post::create(['title' => 'Hello'])->id;
+        Post::whereKey($id)->update(['slug' => 'hello']);
+
+        $repository = new class extends PostRepository
+        {
+            protected ?string $findBy = 'slug';
+        };
+
+        $this->assertSame($id, $repository->find('hello')?->id);
+        $this->assertNull($repository->find((string) $id));
+        $this->assertSame('New', $repository->update('hello', PostInputData::from(['title' => 'New', 'body' => null]))->title);
+        $this->assertTrue($repository->delete('hello'));
+
+        try {
+            $repository->findOrFail('hello');
+            $this->fail('Expected ModelNotFoundException.');
+        } catch (ModelNotFoundException $e) {
+            $this->assertSame(Post::class, $e->getModel());
+            $this->assertSame(['hello'], $e->getIds());
+        }
     }
 
     public function test_missing_record_throws_not_found(): void

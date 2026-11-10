@@ -24,6 +24,8 @@ final class ModelDefinition
         public readonly bool $softDeletes = false,
         /** @var array<string, Relation> keyed by relation name */
         public readonly array $relations = [],
+        /** Column the routes address records by (getRouteKeyName()); null = the primary key. */
+        public readonly ?string $routeKeyName = null,
     ) {}
 
     /** Post */
@@ -47,6 +49,12 @@ final class ModelDefinition
     public function key(): Field
     {
         return $this->fields[$this->keyName];
+    }
+
+    /** Column the routes address records by: the route key, or the primary key. */
+    public function routeKey(): string
+    {
+        return $this->routeKeyName ?? $this->keyName;
     }
 
     /** @return array<string, Field> */

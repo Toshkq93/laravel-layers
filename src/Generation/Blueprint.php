@@ -66,6 +66,21 @@ final class Blueprint
         return in_array($this->model->keyType, ['int', 'integer'], true) ? 'int' : 'string';
     }
 
+    /**
+     * PHP type of the value in the route ({post}): the key type, or the
+     * route key column's type when the model is addressed by another column.
+     */
+    public function routeKeyType(): string
+    {
+        $column = $this->model->routeKeyName;
+
+        if ($column === null) {
+            return $this->keyType();
+        }
+
+        return $this->model->fields[$column]->type === 'int' ? 'int' : 'string';
+    }
+
     /** Route parameter name: {post} */
     public function routeParameter(): string
     {

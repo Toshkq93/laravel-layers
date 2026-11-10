@@ -3,7 +3,7 @@
         ${{ variable }} = {{ factory }}::new()->create();
         $payload = {{ payload }};
 
-        $this->patchJson(route('{{ route }}', ${{ variable }}->getKey()), $payload)
+        $this->patchJson(route('{{ route }}', ${{ variable }}->getRouteKey()), $payload)
             ->assertOk(){{ assertions }};{{ database }}
     }
 

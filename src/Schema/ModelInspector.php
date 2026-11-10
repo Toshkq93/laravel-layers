@@ -100,7 +100,21 @@ class ModelInspector
             fields: $fields,
             softDeletes: $this->usesSoftDeletes($model),
             relations: $this->relations->inspect($model),
+            routeKeyName: $this->routeKeyName($model, $fields),
         );
+    }
+
+    /**
+     * getRouteKeyName() when it differs from the primary key and is a real
+     * column of the table; otherwise records are addressed by the key.
+     *
+     * @param  array<string, Field>  $fields
+     */
+    private function routeKeyName(Model $model, array $fields): ?string
+    {
+        $name = $model->getRouteKeyName();
+
+        return $name !== $model->getKeyName() && isset($fields[$name]) ? $name : null;
     }
 
     private function usesSoftDeletes(Model $model): bool

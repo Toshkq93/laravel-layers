@@ -94,6 +94,8 @@ class InputDataGenerator extends Generator
     /**
      * The key comes from the route ({post}) and is hidden from toArray(),
      * so it never ends up in the attributes passed to create()/update().
+     * With a custom route key (getRouteKeyName()) it holds that column's
+     * value, and the repository looks records up by it ($findBy).
      */
     private function id(Blueprint $blueprint, Imports $imports): string
     {
@@ -102,7 +104,7 @@ class InputDataGenerator extends Generator
             $imports->add(Hidden::class),
         ];
 
-        return $this->property($attributes, $blueprint->keyType(), 'id');
+        return $this->property($attributes, $blueprint->routeKeyType(), 'id');
     }
 
     /** @return list<string> */
@@ -177,7 +179,8 @@ class InputDataGenerator extends Generator
 
         if ($update) {
             $reference = $imports->add(RouteParameterReference::class);
-            $rule .= ", ignore: new {$reference}('{$blueprint->routeParameter()}'), ignoreColumn: '{$blueprint->model->keyName}'";
+            // The route holds the route key (slug), so the row is matched by that column.
+            $rule .= ", ignore: new {$reference}('{$blueprint->routeParameter()}'), ignoreColumn: '{$blueprint->model->routeKey()}'";
         }
 
         return $rule.')';

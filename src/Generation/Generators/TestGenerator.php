@@ -52,7 +52,7 @@ class TestGenerator extends Generator
                 'plural' => Str::snake(Str::pluralStudly($model->name())),
                 'table' => $model->table,
                 'key' => $model->keyName,
-                'missingKey' => $blueprint->keyType() === 'int' ? '0' : "'missing'",
+                'missingKey' => $blueprint->routeKeyType() === 'int' ? '0' : "'missing'",
             ];
 
             $uniqueTest = fn (string $stub) => $unique === null

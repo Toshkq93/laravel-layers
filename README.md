@@ -333,6 +333,14 @@ class PostRepository extends EloquentRepository
 
 Inherited public methods: `paginate($perPage = 15, $page = 1)`, `find($id)`, `findOrFail($id)`, `create(InputDataInterface)`, `update($id, InputDataInterface)`, `delete($id)`. They return output DTOs (or a paginator of them), typed through the `@extends` generics for IDEs and static analysis.
 
+`delete()` loads the model and deletes it, so model events and observers (`deleting`, `deleted`) run and `SoftDeletes` applies. A missing record throws `ModelNotFoundException`, which Laravel turns into a 404, the same as `findOrFail()` and `update()`.
+
+When the model is addressed by another column in the routes (`getRouteKeyName()` returns `'slug'`), the generated repository looks records up by it, and the `id` of the input DTOs holds the slug:
+
+```php
+protected ?string $findBy = 'slug';
+```
+
 `paginate()` sorts by the primary key. Change the sort with properties, or override `paginateQuery()` to filter:
 
 ```php
@@ -738,19 +746,21 @@ Public CRUD methods:
 | `findOrFail($id)` | Output DTO, or throws `ModelNotFoundException` (404) |
 | `create(InputDataInterface)` | Output DTO. The model is re-read so DB defaults are included |
 | `update($id, InputDataInterface)` | Output DTO. Only the attributes present in the DTO are updated |
-| `delete($id)` | `bool` |
+| `delete($id)` | `bool`. Deletes through the model (events, observers, soft deletes); throws `ModelNotFoundException` (404) for a missing record |
 
 Configuration and protected helpers for your own queries:
 
 | Member | Returns |
 |---|---|
 | `$with` | Relations eager-loaded by `query()` (default `[]`) |
+| `$findBy` | Column `find()`, `findOrFail()`, `update()` and `delete()` look records up by (default: primary key) |
 | `$orderBy`, `$orderDirection` | Sort of `paginate()` (default: primary key, `asc`) |
 | `paginateQuery()` | `Builder` behind `paginate()`; override to filter |
 | `query()` | `Builder` for the model, with `$with` applied |
 | `toOutput(?Model)` | Output DTO or `null` |
 | `toCollection(iterable)` | `Collection` of output DTOs |
 | `toPaginator(LengthAwarePaginator)` | Paginator of output DTOs |
+| `findModelOrFail($id)` | The model by its key (or `$findBy`); throws `ModelNotFoundException` |
 | `findOne()`, `findOneOrFail()`, `createFrom()`, `updateFrom()`, `deleteOne()` | What the public CRUD methods call; usable from your own methods |
 
 **`Toshkq93\LaravelLayers\Http\Resources\DataResource`:** a base `JsonResource` for resources around output DTOs. `whenLoadedData($value, Resource::class)` returns the related resource (or a collection of them), `null` for an empty relation, and leaves an unloaded (`Optional`) relation out of the response.

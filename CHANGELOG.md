@@ -3,7 +3,9 @@
 All notable changes to this package are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
-## [1.1.1] - 2026-11-10
+## [1.1.2] - 2026-11-10
+
+Same code as 1.1.1, which was withdrawn: its tag was moved to another commit after publishing, and Packagist keeps published versions immutable. Use 1.1.2.
 
 ### Fixed
 

@@ -1,5 +1,10 @@
 # Laravel Layers
 
+[![tests](https://github.com/toshkq93/laravel-layers/actions/workflows/tests.yml/badge.svg)](https://github.com/toshkq93/laravel-layers/actions/workflows/tests.yml)
+[![Latest Version](https://img.shields.io/packagist/v/toshkq93/laravel-layers.svg)](https://packagist.org/packages/toshkq93/laravel-layers)
+[![Total Downloads](https://img.shields.io/packagist/dt/toshkq93/laravel-layers.svg)](https://packagist.org/packages/toshkq93/laravel-layers)
+[![License](https://img.shields.io/packagist/l/toshkq93/laravel-layers.svg)](LICENSE)
+
 Layered architecture for Laravel APIs, plus a generator that builds every layer from a model.
 
 ```

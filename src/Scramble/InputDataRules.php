@@ -43,7 +43,7 @@ final class InputDataRules
             /** @var DataProperty $property */
             $name = $property->inputMappedName ?? $property->name;
 
-            if ($property->attributes->has(FromRouteParameter::class) || $property->attributes->has(FromRouteParameterProperty::class)) {
+            if (self::fromRoute($class, $property->name)) {
                 $fromRoute[] = $name;
 
                 continue;
@@ -81,6 +81,18 @@ final class InputDataRules
         }
 
         return array_map(fn ($rule) => array_values((array) $rule), $rules);
+    }
+
+    /**
+     * Filled from the route ({post} -> $id). Read with reflection: the shape of
+     * DataProperty::$attributes differs between laravel-data versions.
+     */
+    private static function fromRoute(string $class, string $property): bool
+    {
+        $reflection = new \ReflectionProperty($class, $property);
+
+        return $reflection->getAttributes(FromRouteParameter::class, \ReflectionAttribute::IS_INSTANCEOF) !== []
+            || $reflection->getAttributes(FromRouteParameterProperty::class, \ReflectionAttribute::IS_INSTANCEOF) !== [];
     }
 
     private static function isInteger(string $class, string $property): bool

@@ -134,6 +134,11 @@ class GeneratedCodeTest extends TestCase
                 $fs->ensureDirectoryExists(dirname($file->path));
                 $fs->put($file->path, $patch ? $patch($file) : $file->contents);
             }
+
+            // Without #[Bind] (Laravel 11) the command adds the binding to RepositoryServiceProvider; do the same.
+            if ($blueprint->generates(Layer::Contract) && ! $blueprint->bindAttribute) {
+                $this->app->bind($naming->fqcn(Layer::Contract), $naming->fqcn(Layer::Repository));
+            }
         }
 
         return ['blueprint' => $blueprint, 'files' => $files];
@@ -207,7 +212,8 @@ class GeneratedCodeTest extends TestCase
         $ns = self::$namespace;
 
         $contract = $this->contents($files, Layer::Contract);
-        $this->assertStringContainsString(" * @extends RepositoryInterface<ArticleData>\n * @extends SoftDeletesRepositoryInterface<ArticleData>\n */\n#[Bind(ArticleRepository::class)]\ninterface ArticleRepositoryInterface extends RepositoryInterface, SoftDeletesRepositoryInterface\n", $contract);
+        $bind = class_exists(\Illuminate\Container\Attributes\Bind::class) ? "#[Bind(ArticleRepository::class)]\n" : '';   // Laravel 12+
+        $this->assertStringContainsString(" * @extends RepositoryInterface<ArticleData>\n * @extends SoftDeletesRepositoryInterface<ArticleData>\n */\n{$bind}interface ArticleRepositoryInterface extends RepositoryInterface, SoftDeletesRepositoryInterface\n", $contract);
         $this->assertSame(0, $this->lint(collect($files)->firstWhere('layer', Layer::Contract)->path));
 
         $this->assertStringContainsString('class ArticleRepository extends EloquentRepository implements ArticleRepositoryInterface', $this->contents($files, Layer::Repository));

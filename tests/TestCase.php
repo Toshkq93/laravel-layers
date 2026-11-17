@@ -21,8 +21,11 @@ abstract class TestCase extends Orchestra
     protected function defineEnvironment($app): void
     {
         // A Laravel app does this in LoadConfiguration; Testbench does not,
-        // and the container ignores #[Bind] without it.
-        $app->resolveEnvironmentUsing($app->environment(...));
+        // and the container ignores #[Bind] without it. Laravel 12+ only
+        // (Laravel 11 has neither the method nor #[Bind]).
+        if (method_exists($app, 'resolveEnvironmentUsing')) {
+            $app->resolveEnvironmentUsing($app->environment(...));
+        }
 
         $app['config']->set('database.default', 'testing');
         $app['config']->set('database.connections.testing', [

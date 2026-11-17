@@ -17,7 +17,7 @@ jobs:
         stability: [prefer-lowest, prefer-stable]
         include:
           - laravel: '11.*'
-            testbench: '9.*'
+            testbench: '^9.6'   # 9.0–9.5 do not work with the Laravel 11.44+ that larastan / scramble need
           - laravel: '12.*'
             testbench: '10.*'
           - laravel: '13.*'

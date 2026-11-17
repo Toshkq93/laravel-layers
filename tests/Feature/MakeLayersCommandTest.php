@@ -109,11 +109,16 @@ class MakeLayersCommandTest extends TestCase
             ->doesntExpectOutputToContain('PostRepositoryInterface')
             ->assertSuccessful();
 
-        $this->artisan('make:layers', ['model' => Post::class, '--contract' => true, '--dry-run' => true])
+        $command = $this->artisan('make:layers', ['model' => Post::class, '--contract' => true, '--dry-run' => true])
             ->expectsOutputToContain('app/Repositories/Contracts/PostRepositoryInterface.php')
-            ->expectsOutputToContain('app/Repositories/PostRepository.php')
-            ->doesntExpectOutputToContain('RepositoryServiceProvider')   // #[Bind] on this Laravel
-            ->assertSuccessful();
+            ->expectsOutputToContain('app/Repositories/PostRepository.php');
+
+        // Laravel 12+ binds with #[Bind]; Laravel 11 gets the binding in a service provider.
+        class_exists(\Illuminate\Container\Attributes\Bind::class)
+            ? $command->doesntExpectOutputToContain('RepositoryServiceProvider')
+            : $command->expectsOutputToContain('RepositoryServiceProvider');
+
+        $command->assertSuccessful();
     }
 
     public function test_several_models_in_dependency_order_link_each_other(): void

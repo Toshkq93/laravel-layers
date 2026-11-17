@@ -39,7 +39,9 @@ $app = Application::create(
         // The Testbench skeleton has no composer.json to read the App\ namespace from.
         (new ReflectionProperty($app, 'namespace'))->setValue($app, 'App\\');
         // A Laravel app does this in LoadConfiguration; without it the container ignores #[Bind].
-        $app->resolveEnvironmentUsing($app->environment(...));
+        if (method_exists($app, 'resolveEnvironmentUsing')) {
+            $app->resolveEnvironmentUsing($app->environment(...));
+        }
     },
     options: ['extra' => ['providers' => [LaravelDataServiceProvider::class, LaravelLayersServiceProvider::class]]],
 );

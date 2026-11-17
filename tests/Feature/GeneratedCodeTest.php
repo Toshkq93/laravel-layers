@@ -31,6 +31,11 @@ class GeneratedCodeTest extends TestCase
 {
     private static string $dir;
 
+    protected function getPackageProviders($app): array
+    {
+        return [...parent::getPackageProviders($app), \Dedoc\Scramble\ScrambleServiceProvider::class];
+    }
+
     private static string $namespace;
 
     protected function setUp(): void
@@ -80,7 +85,7 @@ class GeneratedCodeTest extends TestCase
      * @param  list<Layer>  $layers
      * @return array{blueprint: Blueprint, files: list<\Toshkq93\LaravelLayers\Generation\GeneratedFile>}
      */
-    private function generate(array $layers, string $properties = Naming::PROPERTIES_CAMEL, array $outputsFirst = [], ?callable $patch = null, array $relatedLayers = [Layer::Output, Layer::Resource], string $main = Article::class): array
+    private function generate(array $layers, string $properties = Naming::PROPERTIES_CAMEL, array $outputsFirst = [], ?callable $patch = null, array $relatedLayers = [Layer::Output, Layer::Resource], string $main = Article::class, ?bool $bindAttribute = null): array
     {
         // A fresh namespace per test: generated classes cannot be redeclared.
         self::$namespace = 'Generated'.bin2hex(random_bytes(4));
@@ -94,6 +99,7 @@ class GeneratedCodeTest extends TestCase
             'controller' => ['namespace' => "{$ns}\\Http\\Controllers", 'suffix' => 'Controller'],
             'service' => ['namespace' => "{$ns}\\Services", 'suffix' => 'Service'],
             'repository' => ['namespace' => "{$ns}\\Repositories", 'suffix' => 'Repository', 'extends' => \Toshkq93\LaravelLayers\Repositories\EloquentRepository::class],
+            'contract' => ['namespace' => "{$ns}\\Repositories\\Contracts", 'suffix' => 'RepositoryInterface'],
             'middleware' => ['namespace' => "{$ns}\\Http\\Middleware", 'suffix' => 'Middleware'],
             'policy' => ['namespace' => "{$ns}\\Policies", 'suffix' => 'Policy'],
             'factory' => ['namespace' => "{$ns}\\Factories", 'suffix' => 'Factory', 'path' => self::$dir.'/Factories', 'extends' => \Illuminate\Database\Eloquent\Factories\Factory::class],
@@ -120,7 +126,7 @@ class GeneratedCodeTest extends TestCase
         foreach ([...$outputsFirst, $main] as $model) {
             $definition = (new ModelInspector)->inspect($model);
             $naming = new Naming($definition, $config, $ns.'\\', self::$dir, $properties);
-            $blueprint = new Blueprint($definition, $naming, $model === $main ? $layers : $relatedLayers, Action::cases());
+            $blueprint = new Blueprint($definition, $naming, $model === $main ? $layers : $relatedLayers, Action::cases(), bindAttribute: $bindAttribute);
             $blueprint = $blueprint->withImplicitLayers();
             $files = (new LayerGenerator(new StubRenderer))->generate($blueprint);
 
@@ -193,6 +199,104 @@ class GeneratedCodeTest extends TestCase
 
         $this->deleteJson("articles/{$id}")->assertNoContent();
         $this->getJson("articles/{$id}")->assertNotFound();
+    }
+
+    public function test_contract_binds_itself_to_the_repository(): void
+    {
+        ['files' => $files] = $this->generate(Layer::cases());
+        $ns = self::$namespace;
+
+        $contract = $this->contents($files, Layer::Contract);
+        $this->assertStringContainsString(" * @extends RepositoryInterface<ArticleData>\n * @extends SoftDeletesRepositoryInterface<ArticleData>\n */\n#[Bind(ArticleRepository::class)]\ninterface ArticleRepositoryInterface extends RepositoryInterface, SoftDeletesRepositoryInterface\n", $contract);
+        $this->assertSame(0, $this->lint(collect($files)->firstWhere('layer', Layer::Contract)->path));
+
+        $this->assertStringContainsString('class ArticleRepository extends EloquentRepository implements ArticleRepositoryInterface', $this->contents($files, Layer::Repository));
+        $service = $this->contents($files, Layer::Service);
+        $this->assertStringContainsString('@extends CrudService<ArticleRepositoryInterface, ArticleData>', $service);
+        $this->assertStringContainsString('public function __construct(ArticleRepositoryInterface $repository)', $service);
+
+        $this->assertInstanceOf("{$ns}\\Repositories\\ArticleRepository", app("{$ns}\\Repositories\\Contracts\\ArticleRepositoryInterface"));
+
+        Gate::policy(Article::class, "{$ns}\\Policies\\ArticlePolicy");
+        $this->routes();
+        $this->postJson('articles', ['title' => 'Hi', 'user_id' => 1])->assertCreated();
+    }
+
+    public function test_controller_uses_the_contract_when_there_is_no_service(): void
+    {
+        ['blueprint' => $blueprint, 'files' => $files] = $this->generate([Layer::Controller, Layer::Contract]);
+
+        $this->assertTrue($blueprint->generates(Layer::Repository));   // the contract is bound to it
+        $this->assertStringContainsString('private readonly ArticleRepositoryInterface $repository', $this->contents($files, Layer::Controller));
+
+        $this->routes();
+        $this->postJson('articles', ['title' => 'Hi', 'user_id' => 1])->assertCreated();
+    }
+
+    public function test_contract_without_bind_attribute(): void
+    {
+        ['files' => $files] = $this->generate([Layer::Repository, Layer::Contract], bindAttribute: false);
+
+        $contract = $this->contents($files, Layer::Contract);
+        $this->assertStringNotContainsString('Bind', $contract);
+        $this->assertStringContainsString(" */\ninterface ArticleRepositoryInterface extends", $contract);
+        $this->assertSame(0, $this->lint(collect($files)->firstWhere('layer', Layer::Contract)->path));
+    }
+
+    public function test_repository_without_contract_implements_nothing(): void
+    {
+        ['files' => $files] = $this->generate([Layer::Repository, Layer::Service]);
+
+        $this->assertStringContainsString("class ArticleRepository extends EloquentRepository\n", $this->contents($files, Layer::Repository));
+        $this->assertStringContainsString('public function __construct(ArticleRepository $repository)', $this->contents($files, Layer::Service));
+    }
+
+    /**
+     * The generated API through dedoc/scramble, with the package's integration.
+     */
+    public function test_openapi_document(): void
+    {
+        $this->generate(Layer::cases(), Naming::PROPERTIES_CAMEL, [User::class, Comment::class]);
+        Gate::policy(Article::class, self::$namespace.'\\Policies\\ArticlePolicy');
+        $this->routes();
+        \Dedoc\Scramble\Scramble::configure()->routes(fn (\Illuminate\Routing\Route $route) => str_starts_with($route->uri, 'articles'));
+
+        $path = self::$dir.'/openapi.json';
+        $this->artisan('scramble:export', ['--path' => $path])->assertSuccessful();
+        $doc = json_decode(file_get_contents($path), true);
+        $paths = $doc['paths'];
+        $schemas = $doc['components']['schemas'];
+
+        // index: query parameters from IndexArticleData, a paginated resource.
+        $index = $paths['/articles']['get'];
+        $this->assertSame(
+            ['page' => ['type' => 'integer', 'minimum' => 1], 'per_page' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 100]],
+            collect($index['parameters'])->mapWithKeys(fn ($p) => [$p['name'] => $p['schema']])->all(),
+        );
+        $this->assertSame(['data', 'links', 'meta'], array_keys($index['responses']['200']['content']['application/json']['schema']['properties']));
+
+        // store: body from StoreArticleData, 201, 422 (rules) and 403 (authorize()).
+        $store = $paths['/articles']['post'];
+        $this->assertSame('#/components/schemas/StoreArticleData', $store['requestBody']['content']['application/json']['schema']['$ref']);
+        $this->assertEqualsCanonicalizing(['201', '422', '403'], array_keys($store['responses']));
+        $this->assertEqualsCanonicalizing(['user_id', 'title'], $schemas['StoreArticleData']['required']);
+        $this->assertSame('integer', $schemas['StoreArticleData']['properties']['user_id']['type']);
+        $this->assertArrayHasKey('secret', $schemas['StoreArticleData']['properties']);   // $hidden only hides it from responses
+
+        // update: the key comes from the path, not the body; every field is optional.
+        $update = $paths['/articles/{article}']['put'];
+        $this->assertSame(['article'], array_column($update['parameters'], 'name'));
+        $this->assertArrayNotHasKey('id', $schemas['UpdateArticleData']['properties']);
+        $this->assertArrayNotHasKey('required', $schemas['UpdateArticleData']);
+        $this->assertEqualsCanonicalizing(['200', '404', '422', '403'], array_keys($update['responses']));
+
+        // Relations: the related resource, optional (left out when not loaded).
+        $resource = $schemas['ArticleResource'];
+        $this->assertSame(['anyOf' => [['$ref' => '#/components/schemas/UserResource'], ['type' => 'null']]], $resource['properties']['author']);
+        $this->assertSame(['type' => 'array', 'items' => ['$ref' => '#/components/schemas/CommentResource']], $resource['properties']['comments']);
+        $this->assertNotContains('author', $resource['required']);
+        $this->assertNotContains('comments', $resource['required']);
+        $this->assertContains('title', $resource['required']);
     }
 
     public function test_gate_denies_through_input_dto(): void
@@ -466,6 +570,16 @@ class GeneratedCodeTest extends TestCase
         $this->assertCount(1, \DB::getQueryLog());
     }
 
+    public function test_array_properties_document_their_value_type(): void
+    {
+        ['files' => $files] = $this->generate([Layer::Output, Layer::Input]);
+
+        $this->assertStringContainsString("    /** @var array<array-key, mixed>|null */\n    public ?array \$meta;", $this->contents($files, Layer::Output));
+
+        $store = collect($files)->first(fn ($f) => str_ends_with($f->path, 'StoreArticleData.php'))->contents;
+        $this->assertMatchesRegularExpression('#/\*\* @var array<array-key, mixed>\|null \*/\n(    \#\[.*\]\n)*    public \?array \$meta#', $store);
+    }
+
     public function test_relation_without_output_dto_is_skipped_with_a_note(): void
     {
         ['files' => $files] = $this->generate([Layer::Output]);   // UserData / CommentData do not exist
@@ -515,7 +629,9 @@ class GeneratedCodeTest extends TestCase
         $this->assertStringContainsString("public function show(ShowArticleData \$data): ArticleResource\n    {\n        return ArticleResource::make(\$this->service->findOrFail(\$data->id));", $controller);
         $this->assertStringContainsString("return ArticleResource::make(\$this->service->create(\$data))\n            ->response()\n            ->setStatusCode(Response::HTTP_CREATED);", $controller);
         $this->assertStringNotContainsString('Output\\ArticleData;', $controller);   // the output DTO is not referenced
-        $this->assertStringNotContainsString('LengthAwarePaginator', $controller);
+        // Concrete paginator in the @return of index, for OpenAPI tools (links / meta).
+        $this->assertStringContainsString("use Illuminate\\Pagination\\LengthAwarePaginator;", $controller);
+        $this->assertStringContainsString("/**\n     * @return AnonymousResourceCollection<LengthAwarePaginator<int, ArticleResource>>\n     */\n    public function index(", $controller);
     }
 
     public function test_service_extends_crud_service_and_pulls_in_the_repository(): void

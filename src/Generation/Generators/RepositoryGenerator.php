@@ -65,6 +65,7 @@ class RepositoryGenerator extends Generator
             'output' => $output,
             'extends' => $imports->add($naming->extends(Layer::Repository)),
             'class' => $naming->class(Layer::Repository),
+            'implements' => $blueprint->has(Layer::Contract) ? ' implements '.$imports->add($naming->fqcn(Layer::Contract)) : '',
             // CRUD comes from the base repository. Kept empty for stubs published before 0.2.
             'methods' => '',
             'with' => implode("\n\n", array_filter([$this->findBy($blueprint), $this->with($blueprint)])),

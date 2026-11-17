@@ -20,8 +20,15 @@ use Toshkq93\LaravelLayers\Schema\ModelDefinition;
 final class Blueprint
 {
     /**
+     * Whether the contract binds itself with #[Bind] (Laravel 12+). Without
+     * the attribute the binding goes into a service provider.
+     */
+    public readonly bool $bindAttribute;
+
+    /**
      * @param  list<Layer>  $layers
      * @param  list<Action>  $actions
+     * @param  array<class-string, string>  $batch  models generated in the same run (class => table)
      */
     public function __construct(
         public readonly ModelDefinition $model,
@@ -29,7 +36,34 @@ final class Blueprint
         public readonly array $layers,
         public readonly array $actions,
         public readonly RouteGroup $routeGroup = new RouteGroup,
-    ) {}
+        ?bool $bindAttribute = null,
+        public readonly array $batch = [],
+    ) {
+        $this->bindAttribute = $bindAttribute ?? class_exists(\Illuminate\Container\Attributes\Bind::class);
+    }
+
+    /**
+     * Whether a class layer of another model (the output DTO or resource of
+     * a related model) exists, or is generated in the same run: a run for
+     * Post and User links both ways, whatever the order.
+     */
+    public function relatedExists(Layer $layer, string $modelClass): bool
+    {
+        $class = $this->naming->namespace($layer).'\\'.class_basename($modelClass).$this->naming->suffix($layer);
+
+        return class_exists($class) || (isset($this->batch[$modelClass]) && $this->generates($layer));
+    }
+
+    /**
+     * Class services and controllers depend on: the repository contract
+     * when there is one, the repository otherwise.
+     *
+     * @return class-string
+     */
+    public function repositoryDependency(): string
+    {
+        return $this->naming->fqcn($this->has(Layer::Contract) ? Layer::Contract : Layer::Repository);
+    }
 
     public function generates(Layer $layer): bool
     {
@@ -101,11 +135,18 @@ final class Blueprint
      * model and uses the referenced table. Otherwise the generated code
      * would fail only when the tests run.
      *
-     * @return class-string<Factory>|null
+     * @return class-string<Factory<Model>>|null
      */
     public function relatedFactory(string $table): ?string
     {
         $namespace = $this->naming->namespace(Layer::Factory);
+
+        // The factory of a model generated in the same run.
+        $batchModel = array_search($table, $this->batch, true);
+
+        if ($batchModel !== false && $this->generates(Layer::Factory)) {
+            return $namespace.'\\'.class_basename($batchModel).$this->naming->suffix(Layer::Factory);
+        }
         $class = $namespace.'\\'.Str::studly(Str::singular($table)).$this->naming->suffix(Layer::Factory);
 
         if (! class_exists($class) || ! is_subclass_of($class, Factory::class)) {
@@ -140,11 +181,12 @@ final class Blueprint
             $needs[] = Layer::Input;
         }
 
-        if ($this->generates(Layer::Controller) || $this->generates(Layer::Service) || $this->generates(Layer::Repository) || $this->generates(Layer::Resource)) {
+        if ($this->generates(Layer::Controller) || $this->generates(Layer::Service) || $this->generates(Layer::Repository) || $this->generates(Layer::Contract) || $this->generates(Layer::Resource)) {
             $needs[] = Layer::Output;
         }
 
-        if ($this->generates(Layer::Service)) {
+        // The service needs a repository; the contract is bound to one.
+        if ($this->generates(Layer::Service) || $this->generates(Layer::Contract)) {
             $needs[] = Layer::Repository;
         }
 
@@ -161,6 +203,6 @@ final class Blueprint
 
         $ordered = array_values(array_filter(Layer::cases(), fn (Layer $l) => in_array($l, $layers, true)));
 
-        return new self($this->model, $this->naming, $ordered, $this->actions, $this->routeGroup);
+        return new self($this->model, $this->naming, $ordered, $this->actions, $this->routeGroup, $this->bindAttribute, $this->batch);
     }
 }

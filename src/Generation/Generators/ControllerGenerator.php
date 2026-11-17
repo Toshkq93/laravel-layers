@@ -37,8 +37,8 @@ class ControllerGenerator extends Generator
                 ['service' => $imports->add($naming->fqcn(Layer::Service))],
                 fn (Action $action) => $this->crudCall('service', $action, $blueprint),
             ],
-            $blueprint->has(Layer::Repository) => [
-                ['repository' => $imports->add($naming->fqcn(Layer::Repository))],
+            $blueprint->has(Layer::Repository) || $blueprint->has(Layer::Contract) => [
+                ['repository' => $imports->add($blueprint->repositoryDependency())],
                 fn (Action $action) => $this->crudCall('repository', $action, $blueprint),
             ],
             default => [[], fn () => $this->notImplemented($imports)],
@@ -52,7 +52,9 @@ class ControllerGenerator extends Generator
             match (true) {
                 $action === Action::Destroy => $imports->add(Response::class),
                 ! $withResource && $action === Action::Index => $imports->add(LengthAwarePaginator::class),
-                $withResource && $action === Action::Index => $imports->add(AnonymousResourceCollection::class),
+                // The paginator class paginate() returns, for the @return of index: OpenAPI tools
+                // (Scramble) document links / meta from it.
+                $withResource && $action === Action::Index => [$imports->add(AnonymousResourceCollection::class), $imports->add(\Illuminate\Pagination\LengthAwarePaginator::class)],
                 $withResource && $action === Action::Store => [$imports->add(JsonResponse::class), $imports->add(Response::class)],
                 default => null,
             };

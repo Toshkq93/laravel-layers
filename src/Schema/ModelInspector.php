@@ -132,7 +132,7 @@ class ModelInspector
             $columns[] = $model->getUpdatedAtColumn();
         }
 
-        if ($this->usesSoftDeletes($model)) {
+        if ($this->usesSoftDeletes($model) && method_exists($model, 'getDeletedAtColumn')) {
             $columns[] = $model->getDeletedAtColumn();
         }
 
@@ -144,6 +144,7 @@ class ModelInspector
      * (a, b) cannot be expressed as a rule on one property and are skipped;
      * the primary key is unique by definition and never sent by the client.
      *
+     * @param  list<array{columns: list<string>, unique: bool, primary: bool}>  $indexes  Schema::getIndexes()
      * @return list<string>
      */
     private function uniqueColumns(array $indexes): array
@@ -162,6 +163,7 @@ class ModelInspector
     /**
      * Single-column foreign keys indexed by local column.
      *
+     * @param  list<array{columns: list<string>, foreign_table: string, foreign_columns: list<string>}>  $foreignKeys  Schema::getForeignKeys()
      * @return array<string, array{table: string, column: string}>
      */
     private function foreignKeys(array $foreignKeys): array

@@ -21,6 +21,11 @@ class LaravelLayersServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        // OpenAPI docs: requests of input DTOs and relations of resources for dedoc/scramble.
+        if (class_exists(\Dedoc\Scramble\Scramble::class)) {
+            $this->app->booted(fn () => Scramble\ScrambleIntegration::register());
+        }
+
         if (! $this->app->runningInConsole()) {
             return;
         }

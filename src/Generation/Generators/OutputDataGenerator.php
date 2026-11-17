@@ -44,7 +44,8 @@ class OutputDataGenerator extends Generator
 
             [$name, $mapping] = $this->mappedProperty($blueprint, $field->name, $imports);
 
-            $properties[] = ($mapping !== [] ? '    #['.implode(', ', $mapping)."]\n" : '')
+            $properties[] = $this->arrayDocblock($type)
+                .($mapping !== [] ? '    #['.implode(', ', $mapping)."]\n" : '')
                 ."    public {$type} \${$name};";
         }
 
@@ -54,7 +55,7 @@ class OutputDataGenerator extends Generator
             $output = $naming->outputFor($relation->related);
             $self = $output === $naming->fqcn(Layer::Output);
 
-            if (! $self && ! class_exists($output)) {
+            if (! $self && ! $blueprint->relatedExists(Layer::Output, $relation->related)) {
                 $model = class_basename($relation->related);
                 $notes[] = "Relation [{$relation->name}] skipped: {$output} does not exist. Run `php artisan make:layers {$model} --output`, then regenerate this DTO with --output --force.";
 

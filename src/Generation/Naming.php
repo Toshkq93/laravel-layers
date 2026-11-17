@@ -25,11 +25,15 @@ final class Naming
             'suffix' => 'Resource',
             'extends' => \Toshkq93\LaravelLayers\Http\Resources\DataResource::class,
         ],
+        'contract' => [
+            'namespace' => 'App\\Repositories\\Contracts',
+            'suffix' => 'RepositoryInterface',
+        ],
     ];
 
     /**
-     * @param  array<string, array{namespace: string, suffix?: string, extends?: string|null}>  $layers
-     * @param  'camel'|'snake'  $properties
+     * @param  array<string, array{namespace: string, suffix?: string, extends?: string|null, path?: string}>  $layers
+     * @param  string  $properties  'camel' or 'snake' (from the config, checked here)
      */
     public function __construct(
         private readonly ModelDefinition $model,
@@ -151,7 +155,7 @@ final class Naming
         return rtrim($this->appPath, '/').($relative !== '' ? '/'.$relative : '').'/'.$this->class($layer, $action).'.php';
     }
 
-    /** @return array{namespace: string, suffix?: string, extends?: string|null} */
+    /** @return array{namespace: string, suffix?: string, extends?: string|null, path?: string} */
     private function config(Layer $layer): array
     {
         return $this->layers[$layer->value]

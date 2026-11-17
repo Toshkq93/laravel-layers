@@ -32,8 +32,13 @@
         "spatie/laravel-data": "^4.11"
     },
     "require-dev": {
+        "dedoc/scramble": "^0.13.54",
+        "larastan/larastan": "^3.15",
         "orchestra/testbench": "^9.0|^10.0|^11.0",
         "phpunit/phpunit": "^11.0|^12.0"
+    },
+    "suggest": {
+        "dedoc/scramble": "OpenAPI documentation: the package documents input DTOs and resource relations for Scramble (^0.13.54)"
     },
     "autoload": {
         "psr-4": {
@@ -53,7 +58,12 @@
         }
     },
     "scripts": {
-        "test": "phpunit"
+        "test": "phpunit",
+        "analyse": [
+            "phpstan analyse --memory-limit=1G",
+            "@php tests/Analysis/generate.php",
+            "phpstan analyse -c phpstan-generated.neon --memory-limit=1G"
+        ]
     },
     "config": {
         "sort-packages": true

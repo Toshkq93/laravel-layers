@@ -45,6 +45,11 @@ return [
             'suffix' => 'Repository',
             'extends' => \Toshkq93\LaravelLayers\Repositories\EloquentRepository::class,
         ],
+        // Repository interface (--contract), bound to the repository.
+        'contract' => [
+            'namespace' => 'App\\Repositories\\Contracts',
+            'suffix' => 'RepositoryInterface',
+        ],
         'middleware' => [
             'namespace' => 'App\\Http\\Middleware',
             'suffix' => 'Middleware',

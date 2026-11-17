@@ -12,6 +12,8 @@ class {{ class }}
 {
     /**
      * Access conditions for the {{ model }} routes.
+     *
+     * @param  Closure(Request): Response  $next
      */
     public function handle(Request $request, Closure $next): Response
     {

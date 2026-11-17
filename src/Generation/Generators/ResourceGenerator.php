@@ -55,11 +55,11 @@ class ResourceGenerator extends Generator
             $self = $output === $naming->fqcn(Layer::Output);
 
             // The output DTO has no such property: nothing to return.
-            if (! $self && ! class_exists($output)) {
+            if (! $self && ! $blueprint->relatedExists(Layer::Output, $relation->related)) {
                 continue;
             }
 
-            if (! $self && ! class_exists($resource)) {
+            if (! $self && ! $blueprint->relatedExists(Layer::Resource, $relation->related)) {
                 $model = class_basename($relation->related);
                 $notes[] = "Relation [{$relation->name}] skipped in the resource: {$resource} does not exist. Run `php artisan make:layers {$model} --resource`, then regenerate this resource with --resource --force.";
 

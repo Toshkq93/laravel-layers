@@ -10,6 +10,7 @@ enum Layer: string
     case Output = 'output';
     case Resource = 'resource';
     case Repository = 'repository';
+    case Contract = 'contract';
     case Service = 'service';
     case Controller = 'controller';
     case Policy = 'policy';
@@ -25,6 +26,7 @@ enum Layer: string
             self::Output => 'Output DTO',
             self::Resource => 'API resource (controller responses)',
             self::Repository => 'Repository',
+            self::Contract => 'Repository interface (bound to the repository)',
             self::Service => 'Service',
             self::Controller => 'Controller',
             self::Policy => 'Gate (policy + authorize() in input DTOs)',

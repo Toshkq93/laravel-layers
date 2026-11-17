@@ -1,3 +1,6 @@
+    /**
+     * @return AnonymousResourceCollection<LengthAwarePaginator<int, {{ resource }}>>
+     */
     public function index({{ input }} $data): AnonymousResourceCollection
     {
         return {{ resource }}::collection({{ call }});

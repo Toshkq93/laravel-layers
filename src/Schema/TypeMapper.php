@@ -46,6 +46,7 @@ class TypeMapper
     }
 
     /**
+     * @param  array{type_name: string, type: string}  $column  a column of Schema::getColumns()
      * @return array{type: string, maxLength: ?int, allowed: list<string>, format: ?string}
      */
     private function fromColumn(array $column): array

@@ -3,6 +3,32 @@
 All notable changes to this package are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] - 2026-11-17
+
+### Added
+
+- `EloquentRepository::restore()` and `forceDelete()` (and `CrudService` methods delegating to them) for models with `SoftDeletes`. No endpoints are generated for them: add a controller action and a route where your API needs one (see README, "Soft deletes"). They look the record up among soft-deleted ones too, go through the model (events run) and throw `ModelNotFoundException` for a missing record and `LogicException` for a model without `SoftDeletes`. Protected helpers: `findWithTrashedOrFail()`, `restoreOne()`, `forceDeleteOne()`.
+- `--contract` layer (opt-in, not in `--all`): `App\Repositories\Contracts\PostRepositoryInterface` extending the package's `RepositoryInterface` (and `SoftDeletesRepositoryInterface` for models with `SoftDeletes`). The repository implements it, and the service (or the controller without a service) depends on it. On Laravel 12+ the interface binds itself with `#[Bind(PostRepository::class)]`; on Laravel 11 the binding is added to `$bindings` of `App\Providers\RepositoryServiceProvider`, which is created and registered in `bootstrap/providers.php` on first use. A published `config/layers.php` without the `contract` entry falls back to the defaults.
+- OpenAPI documentation through [dedoc/scramble](https://scramble.dedoc.co) 0.13.54+, registered automatically when it is installed (the package does not require it): request bodies and query parameters from input DTOs (spatie/laravel-data, which Scramble does not read on its own), with route-filled fields left out and `int` documented as integer; `422` / `403` for DTOs with rules / `authorize()`; relations of `whenLoadedData()` as the related resource (or an array of them), optional and nullable. Classes in `Toshkq93\LaravelLayers\Scramble`.
+- The generated `index()` with a resource has `@return AnonymousResourceCollection<LengthAwarePaginator<int, PostResource>>`, so OpenAPI tools document `links` and `meta`. Regenerate controllers (`--controller --force`) to get it.
+- Several models in one run: `make:layers Post User Comment --all`, or `--all-models` for every non-abstract Eloquent model in `app/Models` (or `app/`). Output DTOs, resources and factories of models generated in the same run count as existing, so the models get each other's relations and factories in any order. Models are generated after the ones they belong to (`belongsTo`). Actions are shared.
+- `Contracts\RepositoryInterface` and `Contracts\SoftDeletesRepositoryInterface`, both implemented by `EloquentRepository`.
+- Static analysis in CI (PHPStan + Larastan, `composer analyse`): the package at level 6, and the code it generates at level `max`. `tests/Analysis/generate.php` runs `make:layers` for the test models into `build/generated`, and the analyser checks the result.
+
+### Changed
+
+- Generated code passes PHPStan at level `max`. Array properties of DTOs (json columns, array casts) get `/** @var array<array-key, mixed> */`; the middleware types `$next` as `Closure(Request): Response`; tests create records with `createOne()` instead of `create()`, so the analyser knows they get one model and not a collection. Regenerate (`--force`) to pick these up; nothing changes at runtime.
+- `RepositoryInterface` and `SoftDeletesRepositoryInterface` are covariant in their output type, and `CrudService`'s `TRepository` is bound to `RepositoryInterface<TOutput>`: `CrudService<PostRepositoryInterface, PostData>` type-checks, and the service's methods return `PostData` for the analyser and the IDE (before, the output type was lost on the way from the repository).
+- `EloquentRepository` implements `SoftDeletesRepositoryInterface`. `CrudService::restore()` / `forceDelete()` throw `LogicException` for a repository without it instead of calling an undefined method.
+- The middleware layer is opt-in like `--gate` and `--contract`: `--all` and the defaults no longer generate `PostMiddleware`, which was an empty `handle()`. Pass `--middleware` to get it. Shared middleware such as `auth:sanctum` or `throttle:api` goes into `routes.group.middleware`.
+- `CrudService` takes any `RepositoryInterface` instead of `EloquentRepository` (its `@template TRepository` too). Existing services keep working.
+
+### Upgrading
+
+- `--all` no longer generates the middleware. A route block regenerated with `--route --force` keeps `->middleware(PostMiddleware::class)` as long as the class exists; add `--middleware` to scripts that relied on getting a new one.
+- A repository or service of your own that already declares `restore()` or `forceDelete()` with another signature now clashes with the base class: rename the method or match the signature `restore(int|string $id): OutputDataInterface`, `forceDelete(int|string $id): bool`.
+- If you published the stubs, publish them again to get the typed middleware, the array docblocks and `createOne()` in tests (`php artisan vendor:publish --tag=layers-stubs --force`, then re-apply your changes). At least publish `repository.stub` again (or add `{{ implements }}` after `extends {{ extends }}`): without it a repository generated with `--contract` does not implement its interface and the container fails to inject it.
+
 ## [1.1.2] - 2026-11-10
 
 Same code as 1.1.1, which was withdrawn: its tag was moved to another commit after publishing, and Packagist keeps published versions immutable. Use 1.1.2.

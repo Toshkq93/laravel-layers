@@ -50,3 +50,31 @@ jobs:
 
       - name: Run tests
         run: vendor/bin/phpunit
+
+  static-analysis:
+    runs-on: ubuntu-latest
+
+    name: PHPStan (package and generated code)
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php: '8.4'
+          extensions: pdo_sqlite, sqlite3
+          coverage: none
+
+      - name: Install dependencies
+        run: composer update --prefer-stable --prefer-dist --no-interaction --no-progress
+
+      - name: Analyse the package
+        run: vendor/bin/phpstan analyse --memory-limit=1G --no-progress
+
+      # Runs make:layers for the fixture models (every layer, SoftDeletes, relations, contracts)
+      # and analyses the result, so the stubs are checked as code, not as text.
+      - name: Generate layers
+        run: php tests/Analysis/generate.php
+
+      - name: Analyse the generated code
+        run: vendor/bin/phpstan analyse -c phpstan-generated.neon --memory-limit=1G --no-progress

@@ -1,0 +1,9 @@
+# The code make:layers generates (tests/Analysis/generate.php writes it to build/generated).
+includes:
+    - vendor/larastan/larastan/extension.neon
+
+parameters:
+    level: max
+    paths:
+        - build/generated
+    tmpDir: build/phpstan-generated

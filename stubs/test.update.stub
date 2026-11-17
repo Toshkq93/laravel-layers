@@ -1,6 +1,6 @@
     public function test_update_changes_{{ singular }}(): void
     {
-        ${{ variable }} = {{ factory }}::new()->create();
+        ${{ variable }} = {{ factory }}::new()->createOne();
         $payload = {{ payload }};
 
         $this->patchJson(route('{{ route }}', ${{ variable }}->getRouteKey()), $payload)

@@ -21,7 +21,7 @@ final class RouteGroup
     ) {}
 
     /**
-     * @param  array{prefix?: ?string, middleware?: string|list<string>|null, as?: ?string}|null  $config
+     * @param  array<string, mixed>|null  $config  the routes.group config: prefix, middleware (a string or a list), as
      */
     public static function fromConfig(?array $config): self
     {

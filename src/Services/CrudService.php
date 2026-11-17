@@ -5,10 +5,11 @@ declare(strict_types=1);
 namespace Toshkq93\LaravelLayers\Services;
 
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use LogicException;
 use Toshkq93\LaravelLayers\Contracts\InputDataInterface;
 use Toshkq93\LaravelLayers\Contracts\OutputDataInterface;
-use Toshkq93\LaravelLayers\Data\OutputData;
-use Toshkq93\LaravelLayers\Repositories\EloquentRepository;
+use Toshkq93\LaravelLayers\Contracts\RepositoryInterface;
+use Toshkq93\LaravelLayers\Contracts\SoftDeletesRepositoryInterface;
 
 /**
  * Base service: the CRUD methods delegate to the repository.
@@ -25,8 +26,11 @@ use Toshkq93\LaravelLayers\Repositories\EloquentRepository;
  *         }
  *     }
  *
- * @template TRepository of EloquentRepository
- * @template TOutput of OutputData
+ * The repository may be a concrete one (PostRepository) or its contract
+ * (PostRepositoryInterface, generated with --contract).
+ *
+ * @template TRepository of RepositoryInterface<TOutput>
+ * @template TOutput of OutputDataInterface
  */
 abstract class CrudService
 {
@@ -34,11 +38,11 @@ abstract class CrudService
      * @param  TRepository  $repository
      */
     public function __construct(
-        protected readonly EloquentRepository $repository,
+        protected readonly RepositoryInterface $repository,
     ) {}
 
     /**
-     * @return LengthAwarePaginator<int, TOutput>
+     * @return LengthAwarePaginator<int, covariant TOutput>
      */
     public function paginate(int $perPage = 15, int $page = 1): LengthAwarePaginator
     {
@@ -87,5 +91,44 @@ abstract class CrudService
     public function delete(int|string $id): bool
     {
         return $this->repository->delete($id);
+    }
+
+    /**
+     * Models with SoftDeletes only.
+     *
+     * @return TOutput
+     *
+     * @throws \Illuminate\Database\Eloquent\ModelNotFoundException
+     */
+    public function restore(int|string $id): OutputDataInterface
+    {
+        return $this->softDeletesRepository()->restore($id);
+    }
+
+    /**
+     * Models with SoftDeletes only.
+     *
+     * @throws \Illuminate\Database\Eloquent\ModelNotFoundException
+     */
+    public function forceDelete(int|string $id): bool
+    {
+        return $this->softDeletesRepository()->forceDelete($id);
+    }
+
+    /**
+     * EloquentRepository implements SoftDeletesRepositoryInterface; another
+     * RepositoryInterface implementation may not.
+     *
+     * @return SoftDeletesRepositoryInterface<TOutput>
+     *
+     * @throws LogicException
+     */
+    private function softDeletesRepository(): SoftDeletesRepositoryInterface
+    {
+        if (! $this->repository instanceof SoftDeletesRepositoryInterface) {
+            throw new LogicException('['.$this->repository::class.'] does not implement '.SoftDeletesRepositoryInterface::class.'.');
+        }
+
+        return $this->repository;
     }
 }

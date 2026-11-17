@@ -9,7 +9,7 @@ namespace {{ namespace }};
 /**
  * API tests for {{ model }}. Requests are sent as a guest: when the policy
  * starts requiring a user, authenticate in setUp(), e.g.
- * $this->actingAs(UserFactory::new()->create());
+ * $this->actingAs(UserFactory::new()->createOne());
  */
 class {{ class }} extends {{ extends }}
 {

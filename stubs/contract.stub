@@ -1,0 +1,15 @@
+<?php
+
+declare(strict_types=1);
+
+namespace {{ namespace }};
+
+{{ imports }}
+
+/**
+{{ generics }}
+ */
+{{ attributes }}interface {{ class }} extends {{ extends }}
+{
+    // Declare the repository's own public methods here.
+}

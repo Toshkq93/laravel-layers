@@ -232,6 +232,10 @@ class InputDataGenerator extends Generator
     {
         $lines = [];
 
+        if ($docblock = $this->arrayDocblock($type)) {
+            $lines[] = rtrim($docblock);
+        }
+
         if ($attributes !== []) {
             $lines[] = '    #['.implode(', ', $attributes).']';
         }

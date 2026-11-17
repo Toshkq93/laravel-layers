@@ -121,4 +121,21 @@ abstract class Generator
 
         return "    public function __construct(\n".implode("\n", $lines)."\n    ) {}";
     }
+
+    /**
+     * Docblock with the value type of an array property (json columns, array
+     * casts): static analysers require one. "?array" -> array<array-key, mixed>|null
+     */
+    protected function arrayDocblock(string $type): string
+    {
+        $parts = str_starts_with($type, '?') ? [substr($type, 1), 'null'] : explode('|', $type);
+
+        if (! in_array('array', $parts, true)) {
+            return '';
+        }
+
+        $parts = array_map(fn (string $part) => $part === 'array' ? 'array<array-key, mixed>' : $part, $parts);
+
+        return '    /** @var '.implode('|', $parts)." */\n";
+    }
 }

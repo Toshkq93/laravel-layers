@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Toshkq93\LaravelLayers\Generation;
 
+use Toshkq93\LaravelLayers\Generation\Generators\ContractGenerator;
 use Toshkq93\LaravelLayers\Generation\Generators\ControllerGenerator;
 use Toshkq93\LaravelLayers\Generation\Generators\FactoryGenerator;
 use Toshkq93\LaravelLayers\Generation\Generators\Generator;
@@ -34,6 +35,7 @@ final class LayerGenerator
             new OutputDataGenerator($stubs),
             new ResourceGenerator($stubs),
             new RepositoryGenerator($stubs),
+            new ContractGenerator($stubs),
             new ServiceGenerator($stubs),
             new ControllerGenerator($stubs),
             new PolicyGenerator($stubs),

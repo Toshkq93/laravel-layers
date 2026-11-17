@@ -176,6 +176,22 @@ class EloquentRepositoryTest extends TestCase
         $this->repository->findOrFail(999);
     }
 
+    public function test_restore_and_force_delete_need_soft_deletes(): void
+    {
+        $id = Post::create(['title' => 'A', 'published' => false])->id;
+
+        foreach (['restore', 'forceDelete'] as $method) {
+            try {
+                $this->repository->{$method}($id);
+                $this->fail("{$method}() should require SoftDeletes.");
+            } catch (\LogicException $e) {
+                $this->assertStringContainsString('does not use SoftDeletes', $e->getMessage());
+            }
+        }
+
+        $this->assertDatabaseHas('posts', ['id' => $id]);
+    }
+
     public function test_update_missing_record_throws_not_found(): void
     {
         $this->expectException(ModelNotFoundException::class);

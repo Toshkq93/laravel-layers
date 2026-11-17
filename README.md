@@ -63,7 +63,6 @@ php artisan make:layers Post --all
  app/Repositories/PostRepository.php .......... created
  app/Services/PostService.php ................. created
  app/Http/Controllers/Api/PostController.php .. created
- app/Http/Middleware/PostMiddleware.php ....... created
  database/factories/PostFactory.php ........... created
  tests/Feature/PostApiTest.php ................ created
  routes/api.php ............................... routes added
@@ -75,10 +74,17 @@ The result is a working CRUD API at `/api/posts` with passing tests (`php artisa
 ## Command
 
 ```bash
-php artisan make:layers {model} [options]
+php artisan make:layers {model...} [options]
 ```
 
-`model` takes a short name (`Post`, resolved to `App\Models\Post` or `App\Post`), a path (`Blog/Post`) or a fully qualified class name.
+`model` takes a short name (`Post`, resolved to `App\Models\Post` or `App\Post`), a path (`Blog/Post`) or a fully qualified class name. Pass several to generate them in one run, or `--all-models` for every model of the application:
+
+```bash
+php artisan make:layers Post User Comment --all
+php artisan make:layers --all-models --output --resource
+```
+
+In one run, models are linked to each other whatever their order: `PostData` gets `$user` and `UserData` gets `$posts` (when `User` has a `posts()` relation), the factories use each other for foreign keys, even though none of these classes existed before. The models are generated after the ones they belong to (`belongsTo`), so the output, the routes and the factories follow the foreign keys. `--all-models` takes the non-abstract Eloquent models in `app/Models` (or `app/` when there is no `Models` directory).
 
 | Option | Generates |
 |---|---|
@@ -86,14 +92,16 @@ php artisan make:layers {model} [options]
 | `--output` | Output DTO |
 | `--resource` | API resource the controller returns |
 | `--repository` | Repository |
+| `--contract` | Repository interface the service depends on, bound to the repository (see [Repository contract](#repository-contract)) |
 | `--service` | Service |
 | `--controller` | Controller |
 | `--gate` | Policy and `authorize()` in the input DTOs |
-| `--middleware` | Middleware applied to the model's routes |
+| `--middleware` | Middleware applied to the model's routes: a class with an empty `handle()` for your own checks. Shared middleware (`auth:sanctum`, `throttle:api`) belongs in the [route group](#shared-route-group) |
 | `--route` | Routes in `routes/api.php` |
 | `--factory` | Model factory with Faker values that match the schema and pass the validation |
 | `--test` | Feature tests for the API (the factory is generated too when missing) |
-| `--all` | Every layer above except `--gate`. Combine them for policies: `--all --gate` |
+| `--all` | Every layer above except `--gate`, `--contract` and `--middleware`. Combine them: `--all --gate --contract` |
+| `--all-models` | Every Eloquent model of the application instead of `model` |
 | `--actions=index,show` | Limits the actions. Default: `index,show,store,update,destroy` |
 | `--force` | Overwrites existing files and replaces the route block |
 | `--dry-run` | Shows what would be generated without writing (`-v` also prints the code) |
@@ -123,6 +131,25 @@ php artisan make:layers Post --controller --force
 | `store` | `POST /posts` | `StorePostData`: writable fields | `create()` | `create` |
 | `update` | `PUT\|PATCH /posts/{post}` | `UpdatePostData`: `id` and writable fields, all optional | `update()` | `update` |
 | `destroy` | `DELETE /posts/{post}` | `DestroyPostData`: `id` | `delete()` | `delete` |
+
+#### Soft deletes
+
+For a model with `SoftDeletes`, `destroy` soft-deletes the record, and `show`, `update` and `destroy` then answer `404`, as Laravel's default scope hides it. `index` lists only records that are not deleted.
+
+No endpoints are generated for restoring or permanently deleting records: whether the API needs them, and how they look, is up to you. The repository and the service already have the methods, so a controller action is one line:
+
+```php
+// routes/api.php
+Route::patch('posts/{post}/restore', [PostController::class, 'restore']);
+
+// PostController
+public function restore(int $id): PostResource
+{
+    return new PostResource($this->service->restore($id));
+}
+```
+
+`restore($id)` finds the record among deleted ones too and restores it; `forceDelete($id)` deletes it from the table, soft-deleted or not. Both go through the model (`restoring` / `restored`, `forceDeleting` / `forceDeleted` events run) and throw `ModelNotFoundException` (404) for a missing record. Showing deleted records (`withTrashed()`, `onlyTrashed()`) is also up to you: add a method to the repository.
 
 ## Generated code
 
@@ -272,11 +299,13 @@ How relations are found (the same way laravel-ide-helper finds them):
   - methods of framework traits, such as `Notifiable::notifications()`;
   - relations listed in `$hidden`.
 
-A relation is added only when the related model's output DTO exists. Otherwise the command prints a hint. Generate DTOs for related models first:
+A relation is added only when the related model's output DTO exists or is generated in the same run. Otherwise the command prints a hint. Generate the models together, or the related ones first:
 
 ```bash
+php artisan make:layers Post User --all     # PostData gets $user, UserData gets $posts if User has posts()
+
 php artisan make:layers User --output
-php artisan make:layers Post --all     # PostData gets $user
+php artisan make:layers Post --all          # PostData gets $user
 ```
 
 Single relations (`belongsTo`, `hasOne`, `morphOne`, `hasOneThrough`) become `RelatedData|Optional|null`. Collection relations (`hasMany`, `belongsToMany`, `morphMany`, `morphToMany`, `hasManyThrough`) become `Collection|Optional`.
@@ -314,7 +343,7 @@ class PostResource extends DataResource
 - `$this->userId` reads the DTO property. Keys are the column names.
 - Dates use `DATE_ATOM`, the format laravel-data uses, so the values look the same as when the DTO is returned.
 - Relations go through the related model's resource. `whenLoadedData()` from the base `DataResource` leaves a relation out when it is not loaded (`Optional` in the DTO; `whenLoaded()` only works with models). A loaded empty relation becomes `null` or `[]`.
-- A relation is added only when the related resource exists. Otherwise the command prints a hint. Generate the related resource first: `php artisan make:layers User --output --resource`.
+- A relation is added only when the related resource exists or is generated in the same run. Otherwise the command prints a hint. Generate the models together (`make:layers Post User --resource`) or the related resource first: `php artisan make:layers User --output --resource`.
 
 Responses are in the Laravel resource format: a single record is wrapped in `data`, and a paginated list has `data`, `links` and `meta` (`meta.total`, `meta.current_page`, ...). `store` returns `201 Created`.
 
@@ -382,9 +411,45 @@ public function publishedBy(int $userId): Collection
 }
 ```
 
+### Repository contract
+
+With `--contract`, the service (or the controller, when there is no service) depends on an interface instead of the repository class. Swap the implementation or mock the interface in unit tests:
+
+```php
+/**
+ * @extends RepositoryInterface<PostData>
+ * @extends SoftDeletesRepositoryInterface<PostData>
+ */
+#[Bind(PostRepository::class)]
+interface PostRepositoryInterface extends RepositoryInterface, SoftDeletesRepositoryInterface
+{
+    // Declare the repository's own public methods here.
+}
+
+class PostRepository extends EloquentRepository implements PostRepositoryInterface { /* ... */ }
+
+class PostService extends CrudService
+{
+    public function __construct(PostRepositoryInterface $repository) { /* ... */ }
+}
+```
+
+- The CRUD methods come from the package's `RepositoryInterface`. `SoftDeletesRepositoryInterface` (`restore()`, `forceDelete()`) is added for models with `SoftDeletes`. When you add a public method to the repository, declare it in the interface too.
+- **Laravel 12+:** the interface binds itself with the container's `#[Bind]` attribute. Nothing else is registered.
+- **Laravel 11** (no `#[Bind]`): the binding goes into `App\Providers\RepositoryServiceProvider`, created on first use and added to `bootstrap/providers.php`. Each model adds a line before the `// layers:bindings` marker; keep the marker if you edit the file.
+
+  ```php
+  public array $bindings = [
+      \App\Repositories\Contracts\PostRepositoryInterface::class => \App\Repositories\PostRepository::class,
+      // layers:bindings
+  ];
+  ```
+
+The command checks whether the attribute class exists, not the version number. `--contract` is not part of `--all`. Adding it later (`make:layers Post --contract --repository --service --force`) regenerates the repository with `implements` and the service with the interface.
+
 ### Service and controller
 
-The service extends `CrudService`, which delegates `paginate()`, `find()`, `findOrFail()`, `create()`, `update()` and `delete()` to the repository. The generated class only passes the typed repository:
+The service extends `CrudService`, which delegates `paginate()`, `find()`, `findOrFail()`, `create()`, `update()`, `delete()`, `restore()` and `forceDelete()` to the repository. The generated class only passes the typed repository:
 
 ```php
 /**
@@ -398,6 +463,10 @@ class PostService extends CrudService
     }
 }
 ```
+
+The generics carry the output type through: PHPStan and the IDE know that `$service->findOrFail($id)` returns `PostData` and `paginate()` a paginator of `PostData`, with the concrete repository or with its contract.
+
+`restore()` and `forceDelete()` need a repository implementing `SoftDeletesRepositoryInterface` (`EloquentRepository` does); with another `RepositoryInterface` implementation they throw `LogicException`.
 
 Put business logic here: add methods, or override a CRUD method and call `parent::` or `$this->repository`:
 
@@ -551,7 +620,7 @@ class PostFactory extends Factory
 
 Values are chosen in this order:
 
-1. **Foreign key:** the related table's factory (`users` → `UserFactory::new()`), used only when it really builds a model of that table: the factory's model class (its `$model`, or the one resolved by convention) must exist, be an Eloquent model and use the referenced table. Otherwise the value is `null`, with a `TODO` comment when the column is `NOT NULL`.
+1. **Foreign key:** the related table's factory (`users` → `UserFactory::new()`), when that model is generated with `--factory` in the same run, or when the existing factory really builds a model of that table: the factory's model class (its `$model`, or the one resolved by convention) must exist, be an Eloquent model and use the referenced table. Otherwise the value is `null`, with a `TODO` comment when the column is `NOT NULL`.
 2. **Enums:** a backed enum cast gives `randomElement(Enum::cases())`; DB enum values give `randomElement([...])`.
 3. **Formats:** uuid, date, datetime, time and numeric.
 4. **Types:** int, float, bool, array. A column with a custom cast class gets `null` and a `TODO` comment.
@@ -576,7 +645,7 @@ Because `$model` is set explicitly, the tests call `PostFactory::new()` and the 
 ```php
 public function test_update_changes_post(): void
 {
-    $post = PostFactory::new()->create();
+    $post = PostFactory::new()->createOne();
     $payload = Arr::only(PostFactory::new()->raw(), ['title']);
 
     $this->patchJson(route('posts.update', $post->getKey()), $payload)
@@ -590,7 +659,7 @@ public function test_update_changes_post(): void
 }
 ```
 
-The tests send requests as a guest. With `--gate`, the generated policy allows guests; once it requires a user, authenticate in `setUp()`, for example with `$this->actingAs(UserFactory::new()->create())`. The tests call routes by name (`posts.store`), so they expect the routes generated by `--route`. They read the response in the resource format (`data.title`, `meta.total`), or at the top level when the model has no resource.
+The tests send requests as a guest. With `--gate`, the generated policy allows guests; once it requires a user, authenticate in `setUp()`, for example with `$this->actingAs(UserFactory::new()->createOne())`. The tests call routes by name (`posts.store`), so they expect the routes generated by `--route`. They read the response in the resource format (`data.title`, `meta.total`), or at the top level when the model has no resource.
 
 ## How layers connect
 
@@ -598,6 +667,7 @@ A layer counts as **available** when it is generated in the current run or its c
 
 - The **controller** calls the service if one is available. Otherwise it calls the repository directly, with the same method calls. If neither exists, its methods throw `LogicException('Not implemented.')`.
 - The **service** needs the repository. If it does not exist, it is generated as well.
+- The **service** and the **controller** depend on the repository contract when it is available, on the repository otherwise. The **contract** needs the repository, and the **repository** implements the contract when it is available.
 - The **controller** returns the resource if one is available. Otherwise it returns the output DTO.
 - The **controller** needs input and output DTOs, the **service**, **repository** and **resource** need the output DTO. Missing DTOs are generated as well, and the command reports every layer added this way.
 - **Input DTOs** get `authorize()` only when a policy is available.
@@ -675,6 +745,7 @@ public ?string $code2fa;
     'controller' => ['namespace' => 'App\\Http\\Controllers\\Api', 'suffix' => 'Controller', 'extends' => 'App\\Http\\Controllers\\Controller'],
     'service'    => ['namespace' => 'App\\Services', 'suffix' => 'Service', 'extends' => CrudService::class],
     'repository' => ['namespace' => 'App\\Repositories', 'suffix' => 'Repository', 'extends' => EloquentRepository::class],
+    'contract'   => ['namespace' => 'App\\Repositories\\Contracts', 'suffix' => 'RepositoryInterface'],
     'middleware' => ['namespace' => 'App\\Http\\Middleware', 'suffix' => 'Middleware'],
     'policy'     => ['namespace' => 'App\\Policies', 'suffix' => 'Policy'],
     // Layers outside app/ declare a path relative to the project root:
@@ -705,6 +776,37 @@ If you move policies out of `App\Policies`, Laravel will not discover them. The 
 Gate::policy(Post::class, \App\Domain\Policies\PostPolicy::class);
 ```
 
+## OpenAPI (Scramble)
+
+The generated API documents itself with [dedoc/scramble](https://scramble.dedoc.co) (0.13.54+). Install it and open `/docs/api`, or export the document:
+
+```bash
+composer require dedoc/scramble --dev
+php artisan scramble:export
+```
+
+Scramble reads the routes, the API resources and the status codes on its own. It does not read spatie/laravel-data objects, so the package teaches it its conventions. This is registered automatically when Scramble is installed; the package does not depend on it.
+
+| | Documented as |
+|---|---|
+| Input DTO of `store`, `update` | JSON request body (`StorePostData`, `UpdatePostData` schemas) from the DTO's validation rules: required fields, types, `nullable`, `max`, enums, dates. Fields filled from the route (`id`) are left out; `update` fields are optional |
+| Input DTO of `index` | Query parameters `page`, `per_page` with their limits |
+| Validation, gate | `422` when the DTO has rules, `403` when it has `authorize()` |
+| `index` | Paginated resource: `data`, `links`, `meta` (from the `@return` docblock of the generated `index()`) |
+| `whenLoadedData()` in a resource | The related resource (`UserResource`, `null`) or an array of them, and optional, as it is left out when not loaded |
+
+`int` properties are documented as integers, although laravel-data validates them with `numeric`.
+
+Only Scramble's default API is configured (`Scramble::configure()`). For APIs registered with `Scramble::registerApi()`, add the extractor yourself:
+
+```php
+Scramble::registerApi('v2', [...])
+    ->withParametersExtractors(fn ($e) => $e->append(\Toshkq93\LaravelLayers\Scramble\InputDataParametersExtractor::class))
+    ->withOperationTransformers(fn ($t) => $t->prepend(\Toshkq93\LaravelLayers\Scramble\InputDataErrorResponses::class));
+```
+
+Known gaps: dates in resources (`->format(DATE_ATOM)`) are plain strings without `format: date-time`, and fields you add to a resource by hand are documented as far as Scramble can infer them.
+
 ## Customizing stubs
 
 ```bash
@@ -718,7 +820,9 @@ Stubs are copied to `stubs/layers/`. A stub found there takes precedence over th
 | `input`, `output` | `namespace`, `imports`, `attributes` (class-level `#[MapName]`), `class`, `extends`, `body` |
 | `resource` | `namespace`, `imports`, `class`, `extends`, `output`, `fields` |
 | `input.authorize` | `parameters`, `gate`, `ability`, `arguments` |
-| `repository` | `namespace`, `imports`, `class`, `extends`, `model`, `output`, `with` |
+| `repository` | `namespace`, `imports`, `class`, `extends`, `implements` (` implements PostRepositoryInterface` or empty), `model`, `output`, `with` |
+| `contract` | `namespace`, `imports`, `generics` (`@extends` lines), `attributes` (`#[Bind(...)]` or empty), `class`, `extends`, `output` |
+| `provider` | `namespace`, `class` (Laravel 11 binding provider; keep the `// layers:bindings` marker) |
 | `service` | `namespace`, `imports`, `class`, `extends`, `repository`, `output` |
 | `controller` | `namespace`, `imports`, `class`, `extends`, `constructor`, `methods` |
 | `controller.{action}` | `input`, `output`, `call` (controller without a resource) |
@@ -736,7 +840,7 @@ Stubs are copied to `stubs/layers/`. A stub found there takes precedence over th
 
 The generated code is built on a few package classes, which you can also use by hand.
 
-**Contracts:** `Toshkq93\LaravelLayers\Contracts\InputDataInterface` and `OutputDataInterface`.
+**Contracts:** `Toshkq93\LaravelLayers\Contracts\InputDataInterface` and `OutputDataInterface`; `RepositoryInterface` (CRUD, implemented by `EloquentRepository`) and `SoftDeletesRepositoryInterface` (`restore()`, `forceDelete()`) for repository contracts.
 
 **Base DTOs:** `Toshkq93\LaravelLayers\Data\InputData` and `OutputData`. Both extend `Spatie\LaravelData\Data` and implement the matching contract, so everything from laravel-data is available: validation attributes, `rules()`, casts, transformers, lazy properties.
 
@@ -752,6 +856,10 @@ Public CRUD methods:
 | `create(InputDataInterface)` | Output DTO. The model is re-read so DB defaults are included |
 | `update($id, InputDataInterface)` | Output DTO. Only the attributes present in the DTO are updated |
 | `delete($id)` | `bool`. Deletes through the model (events, observers, soft deletes); throws `ModelNotFoundException` (404) for a missing record |
+| `restore($id)` | Output DTO. Restores a soft-deleted record (deleted ones are looked up too); `ModelNotFoundException` for a missing record |
+| `forceDelete($id)` | `bool`. Deletes the record permanently, soft-deleted or not; `ModelNotFoundException` for a missing record |
+
+`restore()` and `forceDelete()` throw `LogicException` when the model does not use `SoftDeletes`.
 
 Configuration and protected helpers for your own queries:
 
@@ -766,11 +874,12 @@ Configuration and protected helpers for your own queries:
 | `toCollection(iterable)` | `Collection` of output DTOs |
 | `toPaginator(LengthAwarePaginator)` | Paginator of output DTOs |
 | `findModelOrFail($id)` | The model by its key (or `$findBy`); throws `ModelNotFoundException` |
-| `findOne()`, `findOneOrFail()`, `createFrom()`, `updateFrom()`, `deleteOne()` | What the public CRUD methods call; usable from your own methods |
+| `findWithTrashedOrFail($id)` | The same, soft-deleted records included |
+| `findOne()`, `findOneOrFail()`, `createFrom()`, `updateFrom()`, `deleteOne()`, `restoreOne()`, `forceDeleteOne()` | What the public CRUD methods call; usable from your own methods |
 
 **`Toshkq93\LaravelLayers\Http\Resources\DataResource`:** a base `JsonResource` for resources around output DTOs. `whenLoadedData($value, Resource::class)` returns the related resource (or a collection of them), `null` for an empty relation, and leaves an unloaded (`Optional`) relation out of the response.
 
-**`Toshkq93\LaravelLayers\Services\CrudService`:** a base service. Its constructor takes the repository (available as `$this->repository`). `paginate()`, `find()`, `findOrFail()`, `create()`, `update()` and `delete()` have the same signatures as in the repository and delegate to it. Set `layers.service.extends` to your own subclass to share logic between services.
+**`Toshkq93\LaravelLayers\Services\CrudService`:** a base service. Its constructor takes the repository or its contract, any `RepositoryInterface` (available as `$this->repository`). `paginate()`, `find()`, `findOrFail()`, `create()`, `update()`, `delete()`, `restore()` and `forceDelete()` have the same signatures as in the repository and delegate to it. Set `layers.service.extends` to your own subclass to share logic between services.
 
 ## Limitations
 
@@ -787,6 +896,12 @@ composer test
 ```
 
 The suite includes an end-to-end test that generates every layer into a temporary directory, loads the classes and drives the API over HTTP: validation, CRUD, 404 and gate denial.
+
+```bash
+composer analyse
+```
+
+Runs PHPStan with Larastan twice: on the package (`src/`, level 6) and on the code it generates. `tests/Analysis/generate.php` runs `make:layers` for the test models into `build/generated` (every layer, several models in one run, `SoftDeletes`, relations, with and without `--contract`, camelCase and snake_case properties), and the result is analysed at level `max`. So the generated code is type-checked as code, not compared as text: `@extends` generics, the paginator type, factories and tests included. CI runs both.
 
 ## License
 

@@ -8,17 +8,24 @@ use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Database\Eloquent\SoftDeletingScope;
+use Illuminate\Pagination\LengthAwarePaginator as Paginator;
 use Illuminate\Support\Collection;
+use LogicException;
 use Toshkq93\LaravelLayers\Contracts\InputDataInterface;
 use Toshkq93\LaravelLayers\Contracts\OutputDataInterface;
+use Toshkq93\LaravelLayers\Contracts\RepositoryInterface;
+use Toshkq93\LaravelLayers\Contracts\SoftDeletesRepositoryInterface;
 use Toshkq93\LaravelLayers\Data\OutputData;
 
 /**
  * Base repository on top of Eloquent.
  *
  * Gives every repository the CRUD methods (paginate, find, findOrFail,
- * create, update, delete); a concrete repository only names its model and
- * output DTO and adds its own queries.
+ * create, update, delete, and restore / forceDelete for models with
+ * SoftDeletes); a concrete repository only names its model and output DTO
+ * and adds its own queries.
  *
  * The model never leaves the repository: every public method of a concrete
  * repository should return OutputData, a Collection of OutputData,
@@ -26,8 +33,11 @@ use Toshkq93\LaravelLayers\Data\OutputData;
  *
  * @template TModel of Model
  * @template TOutput of OutputData
+ *
+ * @implements RepositoryInterface<TOutput>
+ * @implements SoftDeletesRepositoryInterface<TOutput>
  */
-abstract class EloquentRepository
+abstract class EloquentRepository implements RepositoryInterface, SoftDeletesRepositoryInterface
 {
     /**
      * Relations eager-loaded by every query of this repository. They end up
@@ -51,7 +61,7 @@ abstract class EloquentRepository
      */
     protected ?string $orderBy = null;
 
-    /** 'asc' or 'desc'. */
+    /** @var 'asc'|'desc' */
     protected string $orderDirection = 'asc';
 
     /**
@@ -119,6 +129,31 @@ abstract class EloquentRepository
     }
 
     /**
+     * Restores a soft-deleted record. Restoring a record that is not
+     * deleted changes nothing and returns it as well.
+     *
+     * @return TOutput
+     *
+     * @throws \Illuminate\Database\Eloquent\ModelNotFoundException
+     * @throws LogicException when the model does not use SoftDeletes
+     */
+    public function restore(int|string $id): OutputDataInterface
+    {
+        return $this->restoreOne($id);
+    }
+
+    /**
+     * Deletes a record permanently, soft-deleted or not.
+     *
+     * @throws \Illuminate\Database\Eloquent\ModelNotFoundException
+     * @throws LogicException when the model does not use SoftDeletes
+     */
+    public function forceDelete(int|string $id): bool
+    {
+        return $this->forceDeleteOne($id);
+    }
+
+    /**
      * @return Builder<TModel>
      */
     protected function query(): Builder
@@ -142,7 +177,8 @@ abstract class EloquentRepository
     }
 
     /**
-     * @return TOutput|null
+     * @param  TModel|null  $model
+     * @return ($model is null ? null : TOutput)
      */
     protected function toOutput(?Model $model): ?OutputDataInterface
     {
@@ -160,16 +196,30 @@ abstract class EloquentRepository
     protected function toCollection(iterable $models): Collection
     {
         return Collection::make($models)
-            ->map(fn (Model $model) => $this->toOutput($model))
+            ->map(fn ($model) => $this->toOutput($model))
             ->values();
     }
 
     /**
+     * @param  LengthAwarePaginator<int, TModel>  $paginator
      * @return LengthAwarePaginator<int, TOutput>
      */
     protected function toPaginator(LengthAwarePaginator $paginator): LengthAwarePaginator
     {
-        return $paginator->through(fn (Model $model) => $this->toOutput($model));
+        // Eloquent's paginator: mapped in place, keeping its path and query string.
+        if ($paginator instanceof Paginator) {
+            $paginator->through(fn (Model $model) => $this->toOutput($model));
+
+            return $paginator;
+        }
+
+        return new Paginator(
+            $this->toCollection($paginator->items()),
+            $paginator->total(),
+            $paginator->perPage(),
+            $paginator->currentPage(),
+            ['path' => Paginator::resolveCurrentPath()],
+        );
     }
 
     /**
@@ -201,8 +251,33 @@ abstract class EloquentRepository
      */
     protected function findModelOrFail(int|string $id): Model
     {
-        $query = $this->query();
+        return $this->firstOrFail($this->query(), $id);
+    }
 
+    /**
+     * The model by its key (or the $findBy column), soft-deleted ones included.
+     *
+     * @return TModel
+     *
+     * @throws \Illuminate\Database\Eloquent\ModelNotFoundException
+     * @throws LogicException when the model does not use SoftDeletes
+     */
+    protected function findWithTrashedOrFail(int|string $id): Model
+    {
+        if (! in_array(SoftDeletes::class, class_uses_recursive($this->model()), true)) {
+            throw new LogicException('['.$this->model().'] does not use SoftDeletes.');
+        }
+
+        // What withTrashed() does, without relying on the SoftDeletes macro.
+        return $this->firstOrFail($this->query()->withoutGlobalScope(SoftDeletingScope::class), $id);
+    }
+
+    /**
+     * @param  Builder<TModel>  $query
+     * @return TModel
+     */
+    private function firstOrFail(Builder $query, int|string $id): Model
+    {
         if ($this->findBy === null) {
             return $query->findOrFail($id);
         }
@@ -254,5 +329,36 @@ abstract class EloquentRepository
     protected function deleteOne(int|string $id): bool
     {
         return (bool) $this->findModelOrFail($id)->delete();
+    }
+
+    /**
+     * Restored through the model, so the restoring / restored events run.
+     *
+     * @return TOutput
+     *
+     * @throws \Illuminate\Database\Eloquent\ModelNotFoundException
+     */
+    protected function restoreOne(int|string $id): OutputDataInterface
+    {
+        $model = $this->findWithTrashedOrFail($id);
+
+        // findWithTrashedOrFail() checked SoftDeletes; this tells it to the analyser.
+        if (! method_exists($model, 'restore')) {
+            throw new LogicException('['.$model::class.'] does not use SoftDeletes.');
+        }
+
+        $model->restore();
+
+        return $this->toOutput($model);
+    }
+
+    /**
+     * Deleted through the model, so the forceDeleting / forceDeleted events run.
+     *
+     * @throws \Illuminate\Database\Eloquent\ModelNotFoundException
+     */
+    protected function forceDeleteOne(int|string $id): bool
+    {
+        return (bool) $this->findWithTrashedOrFail($id)->forceDelete();
     }
 }

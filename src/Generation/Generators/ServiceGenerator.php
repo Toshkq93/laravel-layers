@@ -31,7 +31,7 @@ class ServiceGenerator extends Generator
             'namespace' => $namespace,
             'class' => $naming->class(Layer::Service),
             'extends' => $imports->add($naming->extends(Layer::Service) ?? CrudService::class),
-            'repository' => $imports->add($naming->fqcn(Layer::Repository)),
+            'repository' => $imports->add($blueprint->repositoryDependency()),
             'output' => $imports->add($naming->fqcn(Layer::Output)),
             'imports' => $imports->render(),
         ]);

@@ -12,7 +12,7 @@ final class Relation
 {
     /**
      * @param  class-string<\Illuminate\Database\Eloquent\Model>  $related
-     * @param  class-string<\Illuminate\Database\Eloquent\Relations\Relation>  $type
+     * @param  class-string<\Illuminate\Database\Eloquent\Relations\Relation<\Illuminate\Database\Eloquent\Model, \Illuminate\Database\Eloquent\Model, mixed>>  $type
      */
     public function __construct(
         public readonly string $name,

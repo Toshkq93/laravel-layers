@@ -12,7 +12,9 @@ use Toshkq93\LaravelLayers\Generation\Action;
 use Toshkq93\LaravelLayers\Generation\Blueprint;
 use Toshkq93\LaravelLayers\Generation\Layer;
 use Toshkq93\LaravelLayers\Generation\LayerGenerator;
+use Toshkq93\LaravelLayers\Generation\ModelOrder;
 use Toshkq93\LaravelLayers\Generation\Naming;
+use Toshkq93\LaravelLayers\Generation\ProviderWriter;
 use Toshkq93\LaravelLayers\Generation\RouteGroup;
 use Toshkq93\LaravelLayers\Generation\RouteWriter;
 use Toshkq93\LaravelLayers\Generation\StubRenderer;
@@ -23,16 +25,18 @@ use function Laravel\Prompts\multiselect;
 class MakeLayersCommand extends Command
 {
     protected $signature = 'make:layers
-        {model : Model name (Post, Blog/Post) or its fully qualified class}
-        {--all : Generate every layer except the gate (add --gate for policies)}
+        {model?* : Model names (Post, Blog/Post) or fully qualified classes; several are generated in one run}
+        {--all-models : Every Eloquent model of the application (app/Models, or app/ without it)}
+        {--all : Generate every layer except the gate, the contract and the middleware (add --gate, --contract, --middleware)}
         {--input : Input DTOs, one per action (validation)}
         {--output : Output DTO}
         {--resource : API resource returned by the controller}
         {--repository : Repository}
+        {--contract : Repository interface, bound to the repository; services depend on it}
         {--service : Service}
         {--controller : Controller}
         {--gate : Policy + authorize() in the input DTOs}
-        {--middleware : Middleware for the model routes}
+        {--middleware : Middleware for the model routes (an empty handle() to fill in)}
         {--route : Routes in routes/api.php}
         {--factory : Model factory with Faker values matching the schema}
         {--test : Feature tests for the generated API}
@@ -40,7 +44,7 @@ class MakeLayersCommand extends Command
         {--force : Overwrite existing files and the route block}
         {--dry-run : Show what would be generated without writing anything}';
 
-    protected $description = 'Generate architectural layers (DTOs, API resources, repository, service, controller, gate, middleware, routes, factory, tests) for a model';
+    protected $description = 'Generate architectural layers (DTOs, API resources, repository, service, controller, gate, middleware, routes, factory, tests) for one or more models';
 
     /** Command option => layer */
     private const OPTIONS = [
@@ -48,6 +52,7 @@ class MakeLayersCommand extends Command
         'output' => Layer::Output,
         'resource' => Layer::Resource,
         'repository' => Layer::Repository,
+        'contract' => Layer::Contract,
         'service' => Layer::Service,
         'controller' => Layer::Controller,
         'gate' => Layer::Policy,
@@ -58,22 +63,25 @@ class MakeLayersCommand extends Command
     ];
 
     /** Layers left out of --all and the defaults: generated only when asked for. */
-    private const OPT_IN = [Layer::Policy];
+    private const OPT_IN = [Layer::Policy, Layer::Contract, Layer::Middleware];
 
     public function handle(Filesystem $files, ModelInspector $inspector): int
     {
         try {
-            $definition = $inspector->inspect($this->resolveModel((string) $this->argument('model')));
+            $definitions = ModelOrder::sort(array_map(
+                fn (string $class) => $inspector->inspect($class),
+                $this->models(),
+            ));
             $layers = $this->layers();
             $actions = $this->actions();
-            $naming = new Naming(
+            $namings = array_map(fn ($definition) => new Naming(
                 $definition,
                 config('layers.layers'),
                 $this->laravel->getNamespace(),
                 app_path(),
                 config('layers.properties', Naming::PROPERTIES_CAMEL),
                 base_path(),
-            );
+            ), $definitions);
         } catch (InvalidArgumentException|RuntimeException $e) {
             $this->components->error($e->getMessage());
 
@@ -86,15 +94,43 @@ class MakeLayersCommand extends Command
             return self::SUCCESS;
         }
 
-        $selected = new Blueprint($definition, $naming, $layers, $actions, RouteGroup::fromConfig(config('layers.routes.group')));
-        $blueprint = $selected->withImplicitLayers();
+        // Related classes generated in this run count as existing (see Blueprint::relatedExists()).
+        $batch = count($definitions) > 1
+            ? array_combine(array_map(fn ($d) => $d->class, $definitions), array_map(fn ($d) => $d->table, $definitions))
+            : [];
+        $announced = [];
 
-        foreach ($blueprint->layers as $layer) {
-            if (! in_array($layer, $layers, true)) {
-                $this->components->info("Also generating {$layer->label()}: the selected layers depend on it.");
+        foreach ($definitions as $i => $definition) {
+            if (count($definitions) > 1) {
+                $this->newLine();
+                $this->line('  <options=bold>'.$definition->class.'</>');
             }
+
+            $selected = new Blueprint(
+                $definition,
+                $namings[$i],
+                $layers,
+                $actions,
+                RouteGroup::fromConfig(config('layers.routes.group')),
+                batch: $batch,
+            );
+            $blueprint = $selected->withImplicitLayers();
+
+            foreach ($blueprint->layers as $layer) {
+                if (! in_array($layer, $layers, true) && ! isset($announced[$layer->value])) {
+                    $announced[$layer->value] = true;
+                    $this->components->info("Also generating {$layer->label()}: the selected layers depend on it.");
+                }
+            }
+
+            $this->generate($files, $blueprint);
         }
 
+        return self::SUCCESS;
+    }
+
+    private function generate(Filesystem $files, Blueprint $blueprint): void
+    {
         $dryRun = (bool) $this->option('dry-run');
         $force = (bool) $this->option('force');
         $generator = new LayerGenerator(new StubRenderer(base_path('stubs/layers')));
@@ -127,13 +163,15 @@ class MakeLayersCommand extends Command
             $this->notes($file->notes);
         }
 
+        if ($blueprint->generates(Layer::Contract) && ! $blueprint->bindAttribute) {
+            $this->writeBinding($files, $blueprint, $dryRun);
+        }
+
         if ($blueprint->generates(Layer::Route)) {
             $this->writeRoutes($files, $blueprint, $dryRun, $force);
         }
 
         $this->policyHint($blueprint);
-
-        return self::SUCCESS;
     }
 
     /** @param list<string> $notes */
@@ -203,6 +241,52 @@ class MakeLayersCommand extends Command
         return false;
     }
 
+    /**
+     * @return list<class-string>
+     */
+    private function models(): array
+    {
+        $names = array_values(array_filter((array) $this->argument('model'), fn ($n) => trim((string) $n) !== ''));
+
+        if ($this->option('all-models')) {
+            $names = [...$names, ...$this->discoverModels()];
+        }
+
+        if ($names === []) {
+            throw new InvalidArgumentException('Pass a model (make:layers Post) or --all-models.');
+        }
+
+        return array_values(array_unique(array_map(fn ($name) => $this->resolveModel((string) $name), $names)));
+    }
+
+    /**
+     * Non-abstract Eloquent models in app/Models (or app/ when there is no
+     * Models directory), the way Laravel's model:show looks them up.
+     *
+     * @return list<class-string>
+     */
+    private function discoverModels(): array
+    {
+        $dir = is_dir(app_path('Models')) ? app_path('Models') : app_path();
+        $models = [];
+
+        foreach ((new \Symfony\Component\Finder\Finder)->files()->in($dir)->name('*.php')->sortByName() as $file) {
+            $relative = str_replace(['/', '.php'], ['\\', ''], ltrim(substr($file->getPathname(), strlen(app_path())), '/'));
+            $class = $this->laravel->getNamespace().$relative;
+
+            if (class_exists($class) && is_subclass_of($class, \Illuminate\Database\Eloquent\Model::class)
+                && ! (new \ReflectionClass($class))->isAbstract()) {
+                $models[] = $class;
+            }
+        }
+
+        if ($models === []) {
+            throw new InvalidArgumentException("No Eloquent models found in {$this->relative($dir)}.");
+        }
+
+        return $models;
+    }
+
     /** @return class-string */
     private function resolveModel(string $name): string
     {
@@ -216,6 +300,41 @@ class MakeLayersCommand extends Command
         }
 
         throw new InvalidArgumentException("Model [{$name}] not found.");
+    }
+
+    /**
+     * Without #[Bind] (Laravel 11) the contract is bound in a service provider.
+     */
+    private function writeBinding(Filesystem $files, Blueprint $blueprint, bool $dryRun): void
+    {
+        $provider = $this->laravel->getNamespace().'Providers\\RepositoryServiceProvider';
+        $path = app_path('Providers/RepositoryServiceProvider.php');
+        $writer = new ProviderWriter($files, new StubRenderer(base_path('stubs/layers')));
+
+        if ($dryRun) {
+            $this->components->twoColumnDetail($this->relative($path), '<fg=cyan>would bind the contract</>');
+            $this->line($writer->binding($blueprint));
+
+            return;
+        }
+
+        $result = $writer->write($blueprint, $path, $provider, $this->laravel->getBootstrapProvidersPath());
+
+        if ($result['status'] === ProviderWriter::NO_MARKER) {
+            $this->components->warn("{$this->relative($path)} has no `// layers:bindings` marker. Add to \$bindings: {$writer->binding($blueprint)}");
+
+            return;
+        }
+
+        $this->components->twoColumnDetail($this->relative($path), match ($result['status']) {
+            ProviderWriter::SKIPPED => '<fg=yellow>binding exists, skipped</>',
+            ProviderWriter::CREATED => '<fg=green>created, contract bound</>',
+            default => '<fg=green>contract bound</>',
+        });
+
+        if ($result['registered']) {
+            $this->components->twoColumnDetail('bootstrap/providers.php', '<fg=green>provider registered</>');
+        }
     }
 
     private function writeRoutes(Filesystem $files, Blueprint $blueprint, bool $dryRun, bool $force): void

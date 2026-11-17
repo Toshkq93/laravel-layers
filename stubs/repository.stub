@@ -9,7 +9,7 @@ namespace {{ namespace }};
 /**
  * @extends {{ extends }}<{{ model }}, {{ output }}>
  */
-class {{ class }} extends {{ extends }}
+class {{ class }} extends {{ extends }}{{ implements }}
 {
 {{ with }}
 

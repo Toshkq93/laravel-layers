@@ -1,0 +1,18 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+
+parameters:
+    level: 6
+    paths:
+        - src
+    tmpDir: build/phpstan
+    ignoreErrors:
+        # Scramble's docblock names a RuleSet type it never declares; plain rule arrays are what it takes.
+        -
+            identifier: argument.type
+            message: '#RulesExtractor\\RuleSet#'
+            path: src/Scramble/InputDataParametersExtractor.php
+        # A runtime guard for Scramble versions older than the installed one.
+        -
+            identifier: function.alreadyNarrowedType
+            path: src/Scramble/ScrambleIntegration.php

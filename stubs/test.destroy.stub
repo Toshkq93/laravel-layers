@@ -1,6 +1,6 @@
     public function test_destroy_deletes_{{ singular }}(): void
     {
-        ${{ variable }} = {{ factory }}::new()->create();
+        ${{ variable }} = {{ factory }}::new()->createOne();
 
         $this->deleteJson(route('{{ route }}', ${{ variable }}->getRouteKey()))->assertNoContent();
 

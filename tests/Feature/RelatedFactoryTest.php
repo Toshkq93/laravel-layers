@@ -81,4 +81,23 @@ class RelatedFactoryTest extends TestCase
 
         $this->assertSame($expected, $blueprint->relatedFactory($table));
     }
+
+    public function test_factory_of_a_model_generated_in_the_same_run(): void
+    {
+        Schema::create('posts', fn (Table $t) => $t->id());
+
+        $layers = config('layers.layers');
+        $layers['factory']['namespace'] = self::NS;
+        $definition = (new ModelInspector)->inspect(Post::class);
+        $naming = new Naming($definition, $layers, 'App\\', '/tmp/app');
+        $batch = [Post::class => 'posts', 'App\\Models\\Author' => 'writers'];
+
+        // No AuthorFactory exists yet, and the table name does not match the model name.
+        $blueprint = new Blueprint($definition, $naming, [Layer::Factory], Action::cases(), batch: $batch);
+        $this->assertSame(self::NS.'\\AuthorFactory', $blueprint->relatedFactory('writers'));
+
+        // Without factories in this run, only existing ones count.
+        $blueprint = new Blueprint($definition, $naming, [Layer::Output], Action::cases(), batch: $batch);
+        $this->assertNull($blueprint->relatedFactory('writers'));
+    }
 }
